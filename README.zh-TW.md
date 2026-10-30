@@ -22,6 +22,8 @@
 使用 https://github.com/akari-sora/synology-nas-cli 檢查並修復我的 Synology NAS（位址：https://192.0.2.10:5001），照著 docs/AGENT-RUNBOOK.md 的步驟執行。
 ```
 
+![一句話交給 Claude Code：它自己檢查、列出修復計畫、問過你再修好（模擬的 NAS）](docs/assets/agent-demo.zh-TW.gif)
+
 ### Agent 會依序執行的步驟
 
 1. **安裝**：複製此儲存庫（或安裝套件）並驗證 `./bin/nas --version`。

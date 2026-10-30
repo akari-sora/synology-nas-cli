@@ -22,6 +22,8 @@ Pegue este prompt en Claude Code, Codex, Cursor, Gemini CLI, OpenCode, Grok Bot 
 Usa https://github.com/akari-sora/synology-nas-cli para auditar y reparar mi Synology NAS en https://192.0.2.10:5001. Sigue docs/AGENT-RUNBOOK.md.
 ```
 
+![One prompt to Claude Code: it audits, shows the plan, asks, then fixes (simulated NAS)](docs/assets/agent-demo.gif)
+
 ### Qué hace el agente, paso a paso
 
 1. **Instalación**: Clona el repositorio (o instala el paquete) y verifica `./bin/nas --version`.

@@ -30,6 +30,8 @@ Verwende https://github.com/akari-sora/synology-nas-cli, um mein Synology NAS un
 Use https://github.com/akari-sora/synology-nas-cli to audit and fix my Synology NAS at https://192.0.2.10:5001. Follow docs/AGENT-RUNBOOK.md.
 ```
 
+![One prompt to Claude Code: it audits, shows the plan, asks, then fixes (simulated NAS)](docs/assets/agent-demo.gif)
+
 ### Was der Agent Schritt für Schritt tut
 
 1. **Installation**: Klont das Repository (oder installiert das Paket) und prüft `./bin/nas --version`.

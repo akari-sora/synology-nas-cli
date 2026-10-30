@@ -18,7 +18,7 @@
 - `nas/alert.py` (`alert`, `--push`), `nas/selfmon.py` (`alert-deploy`), `nas/upgrade.py`, `nas/manage.py` (`pkg`, `volume`, `tailscale`), `nas/advisories.py` (SA-26:13 / SA-26:14 tables).
 - `docs/`: `AGENT-RUNBOOK.md`, `INCIDENT-C3RB3R.md`, `HARDENING.md`, `TROUBLESHOOTING.md`, `ALERTS.md`, `DSM-API-NOTES.md`, `MCP.md`, `EXIT-CODES.md`, `GROK-BOT.md`.
 - `README.<lang>.md` (zh-TW, zh-CN, ja, ko, de, es, fr) and `docs/INCIDENT-C3RB3R.<lang>.md` (zh-TW, zh-CN): translations of the user-facing pages; update them with README.md / the incident page.
-- `docs/assets/`: `demo.gif` / `demo.mp4` (re-record: `cd docs/assets && vhs demo/demo.tape`; `demo/nas` runs the CLI against `tests/fakenas.py`), `social-preview.png`.
+- `docs/assets/`: `demo.gif` / `demo.mp4` (re-record: `cd docs/assets && vhs demo/demo.tape`; `demo/nas` runs the CLI against `tests/fakenas.py`), `social-preview.png`; `agent-demo.gif` / `.mp4` and `agent-demo.zh-TW.*`: Claude Code given one prompt in a throwaway copy of the repo whose `bin/nas` and `nas` are `demo/nas`, recorded with vhs and cut to the active parts.
 - `skills/`: agent skills (`synology-nas/SKILL.md`, `synology-ransomware-response/SKILL.md`) and installers (`install.sh`, `install.ps1`).
 - `tests/`: offline checks (`*_check.py`, shared setup in `_env.py`, fake DSM in `fakenas.py`, `install_check.sh` for `skills/install.sh`), `run_offline.sh`, optional `smoke_live.sh`.
 

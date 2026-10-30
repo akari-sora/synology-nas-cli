@@ -22,6 +22,7 @@ nas.handle = lambda api, method, p: ({"ok": True, "data": SEARCH[method]} if api
                                      else tidy(handle(api, method, p)))  # a clean box: the ransom-note search finds nothing
 s = fakenas.FakeSession(nas)
 s.close = lambda: None
+s.describe = lambda: {"backend": "password", "origin": "https://192.0.2.10:5001", "session": "per-command", "source": "env"}
 cli.open_session = lambda *a, **k: s
 try:
     rc = cli.main()

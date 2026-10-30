@@ -22,6 +22,8 @@ Not affiliated with Synology Inc. Synology Inc. とは提携していません�
 https://github.com/akari-sora/synology-nas-cli を使用して、https://192.0.2.10:5001 にある私の Synology NAS を監査・修復してください。docs/AGENT-RUNBOOK.md の手順に従ってください。
 ```
 
+![One prompt to Claude Code: it audits, shows the plan, asks, then fixes (simulated NAS)](docs/assets/agent-demo.gif)
+
 ### エージェントが実行するステップ
 
 1. **インストール**: リポジトリをクローン（またはパッケージをインストール）し、`./bin/nas --version` で動作を確認します。
