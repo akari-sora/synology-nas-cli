@@ -331,7 +331,7 @@ class PasswordBackend:
     RENEW_CODES = (106, 107, 119)
 
     def __init__(self, origins: list[str], creds: Credentials | None = None, cfg: dict | None = None,
-                 use_cache: bool = True, renew: bool = False):
+                 use_cache: bool = True):
         self.cfg = cfg or config.get()
         self.origins = [o.rstrip("/") for o in origins if o]
         self.origin = None
@@ -343,7 +343,6 @@ class PasswordBackend:
         self._token = None
         self.session_kind = None  # "login" (this process), "cache" (nas login) or "env" (NAS_SID)
         self.trust_device = bool(self.cfg["session"].get("trust_device"))
-        self.renew = renew  # long-lived processes (nas mcp): log in again when DSM drops the session
         if use_cache:
             self._adopt_session()
 
@@ -621,8 +620,8 @@ class PasswordBackend:
                     break
                 last = {"ok": False, "error": r.get("error"), "version": v}
                 code = (r.get("error") or {}).get("code")
-                if code in self.RENEW_CODES and not renewed and (
-                        self.session_kind in ("cache", "env") or (self.renew and self.session_kind == "login")):
+                # DSM drops sessions now and then (119 right after a good login); one new login, once
+                if code in self.RENEW_CODES and not renewed and self.session_kind in ("cache", "env", "login"):
                     self._renew(code)
                     renewed = True
                     continue  # same version again with the new session
@@ -875,13 +874,12 @@ class LocalBackend:
 
 
 def open_session(name: str, chrome_origins: list[str] | None = None, lan_origins: list[str] | None = None,
-                 creds: Credentials | None = None, renew: bool = False) -> Session:
+                 creds: Credentials | None = None) -> Session:
     cfg = config.get()
     if name == "chrome":
         return Session(ChromeBackend(chrome_origins if chrome_origins is not None else cfg["chrome_origins"]))
     if name == "password":
-        return Session(PasswordBackend(lan_origins if lan_origins is not None else cfg["origins"], creds, cfg,
-                                       renew=renew))
+        return Session(PasswordBackend(lan_origins if lan_origins is not None else cfg["origins"], creds, cfg))
     if name == "local":
         return Session(LocalBackend())
     raise NasError(f"unknown backend {name!r}")

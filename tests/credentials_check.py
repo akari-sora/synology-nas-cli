@@ -210,6 +210,19 @@ assert b.session_kind is None and b.call_many(sysinfo)[0]["ok"] and b.session_ki
 b.logout()
 assert not dsm.valid and not os.path.exists(config.path(config.get()["session"]["cache_file"]))
 
+# per-command session dropped by DSM (119): one new login, then the call goes through; a second 119 is returned
+dsm = FakeDSM()
+b = backend(dsm, pw, use_cache=False)
+assert b.call_many(sysinfo)[0]["ok"] and len(dsm.logins) == 1
+dsm.valid.clear()
+assert b.call_many(sysinfo)[0]["ok"] and len(dsm.logins) == 2
+dsm.http_login = dsm.http
+dsm.http = lambda path, fields=None, timeout=60: (dsm.http_login(path, fields, timeout) if (fields or {}).get("method") == "login"
+                                                  else {"success": False, "error": {"code": 119}})
+b._http = dsm.http
+r = b.call_many(sysinfo)[0]
+assert not r["ok"] and r["error"]["code"] == 119 and len(dsm.logins) == 3
+
 # wrong password: one attempt, no retry (AutoBlock counts every failure)
 dsm = FakeDSM()
 bad = creds({"username": "ops", "password_command": "x"}, Run({"x": (0, "wrong\n")}))

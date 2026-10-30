@@ -411,7 +411,7 @@ def main(argv: list[str] | None = None) -> int:
         config.get()["credentials"]["op_password"] = args.op_item.rstrip("/") + "/password"
     if args.cmd == "mcp":
         from .mcp import serve
-        return serve(sys.stdin, sys.stdout, lambda: open_session(args.backend, origins, lan, renew=True),
+        return serve(sys.stdin, sys.stdout, lambda: open_session(args.backend, origins, lan),
                      auto_confirm=args.auto_confirm)
     if args.cmd in NO_SESSION:
         try:
