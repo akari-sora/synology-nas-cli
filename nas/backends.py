@@ -341,7 +341,7 @@ class PasswordBackend:
         self._info = None
         self._sid = None
         self._token = None
-        self._login_error = None  # a rejected login, raised again without sending anything
+        self._rejected = None  # (sha256 of account+password, error) of a login DSM refused
         self.session_kind = None  # "login" (this process), "cache" (nas login) or "env" (NAS_SID)
         self.trust_device = bool(self.cfg["session"].get("trust_device"))
         if use_cache:
@@ -530,14 +530,16 @@ class PasswordBackend:
 
     def login(self, save: bool = False) -> None:
         """Log in with the credential chain. Never retried with the same password:
-        each failure counts toward AutoBlock, so after one this process only raises it again."""
-        if self._login_error is not None:
-            raise self._login_error
+        each failure counts toward AutoBlock, so the same account and password are not sent again
+        in this process after DSM refused them (a changed password is tried)."""
         self.select_origin()
         info = self._api_info()["SYNO.API.Auth"]
         version = min(6, info["maxVersion"])
         account = self.creds.username()
         passwd = self.creds.password(account)
+        tried = hashlib.sha256(f"{account}\0{passwd}".encode()).hexdigest()
+        if self._rejected and self._rejected[0] == tried:
+            raise self._rejected[1]
         fields = {
             "api": "SYNO.API.Auth", "version": str(version), "method": "login",
             "account": account, "passwd": passwd, "session": self.session_name,
@@ -567,8 +569,10 @@ class PasswordBackend:
                       + describe_error("SYNO.API.Auth", {"error": r.get("error"), "version": version})
                       + (f"\n{hint}" if hint else ""))
             exc.code = code  # DSM's login error code (400, 403, 407, ...)
-            self._login_error = exc
+            if code not in (407, 498, 499):  # blocked or upgrading: not a verdict on the password
+                self._rejected = (tried, exc)
             raise exc
+        self._rejected = None
         self.account = account
         self._sid = r["data"]["sid"]
         self._token = r["data"].get("synotoken")

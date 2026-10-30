@@ -238,6 +238,25 @@ for _ in range(4):
     except AuthFailed as e:
         assert "code 400" in str(e)
 assert [x["passwd"] for x in dsm.logins] == ["pw", "changed"], "one rejected login, not one per call"
+b.creds = pw  # the password was fixed (1Password, keychain): the next call signs in
+assert b.call_many(sysinfo)[0]["ok"] and [x["passwd"] for x in dsm.logins] == ["pw", "changed", "pw"]
+# 499 (DSM finishing an upgrade) is not remembered: the next call signs in again
+up = FakeDSM()
+up.http_ok, n499 = up.http, [1]
+def http_499(path, fields=None, timeout=60):
+    if (fields or {}).get("method") == "login" and n499[0]:
+        n499[0] -= 1
+        up.logins.append(fields)
+        return {"success": False, "error": {"code": 499}}
+    return up.http_ok(path, fields, timeout)
+up.http = http_499
+b = backend(up, pw, use_cache=False)
+try:
+    b.call_many(sysinfo)
+    raise AssertionError("499 accepted")
+except NasError as e:
+    assert "499" in str(e)
+assert b.call_many(sysinfo)[0]["ok"] and len(up.logins) == 2
 
 # wrong password: one attempt, no retry (AutoBlock counts every failure)
 dsm = FakeDSM()
