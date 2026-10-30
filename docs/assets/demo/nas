@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""Demo only: `nas` against the test suite's simulated DSM 7.1 box (tests/fakenas.py); its state persists in DEMO_STATE."""
+import os, pickle, sys
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
+sys.path[:0] = [REPO, os.path.join(REPO, "tests")]
+os.environ.setdefault("NAS_CONFIG", os.path.join(os.environ["DEMO_HOME"], "config.json"))
+import fakenas
+from nas import cli
+state = os.environ["DEMO_STATE"]
+nas = pickle.load(open(state, "rb")) if os.path.exists(state) else fakenas.FakeNas()
+# the test data's placeholders, shown as a real box would print them
+SWAP = {"1.2.3.4": "198.51.100.23", "x": "2026-10-31 03:30"}
+def tidy(v):
+    if isinstance(v, dict):
+        return {k: (SWAP["x"] if k == "next_trigger_time" else tidy(x)) for k, x in v.items()}
+    if isinstance(v, list):
+        return [tidy(x) for x in v]
+    return v.replace("1.2.3.4", SWAP["1.2.3.4"]) if isinstance(v, str) else v
+handle = nas.handle
+SEARCH = {"start": {"taskid": "search-1"}, "list": {"finished": True, "total": 0, "files": []}, "stop": {}, "clean": {}}
+nas.handle = lambda api, method, p: ({"ok": True, "data": SEARCH[method]} if api == "SYNO.FileStation.Search"
+                                     else tidy(handle(api, method, p)))  # a clean box: the ransom-note search finds nothing
+s = fakenas.FakeSession(nas)
+s.close = lambda: None
+cli.open_session = lambda *a, **k: s
+try:
+    rc = cli.main()
+finally:
+    nas.__dict__.pop("handle", None)
+    pickle.dump(nas, open(state, "wb"))
+sys.exit(rc)

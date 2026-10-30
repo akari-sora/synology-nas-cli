@@ -1,5 +1,7 @@
 # C3RB3R / `.L0CK3D` ransomware against Synology NAS
 
+[English](INCIDENT-C3RB3R.md) · [繁體中文](INCIDENT-C3RB3R.zh-TW.md) · [简体中文](INCIDENT-C3RB3R.zh-CN.md)
+
 Public incident reference, indicators of compromise, CLI verification steps, and recovery guide for the October 2026 ransomware campaign targeting internet-exposed Synology NAS devices.
 
 ## Summary

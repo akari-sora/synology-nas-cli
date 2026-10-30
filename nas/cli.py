@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import traceback
 
@@ -389,6 +390,29 @@ def logout_cmd(args, lan):
     return lines, data
 
 
+_COLORS = (("1;31", "FAIL|CRITICAL"), ("33", "WARN|WARNING|REFUSED"), ("32", "PASS|OK"), ("2", "SKIP"))
+_STATUS = re.compile(r"\b(" + "|".join(p for _, p in _COLORS) + r")\b")
+
+
+def _paint(text: str) -> str:
+    """Status words in color, suggested commands in cyan, when stdout is a terminal
+    (pipes, NO_COLOR and TERM=dumb stay plain)."""
+    if os.environ.get("NO_COLOR") or os.environ.get("TERM") == "dumb" or not sys.stdout.isatty():
+        return text
+
+    def color(m):
+        code = next(c for c, p in _COLORS if re.fullmatch(p, m.group(1)))
+        return f"\033[{code}m{m.group(1)}\033[0m"
+
+    out = []
+    for line in text.split("\n"):
+        if line.lstrip().startswith("-> "):
+            out.append(f"\033[36m{line}\033[0m")
+        else:
+            out.append(_STATUS.sub(color, line).replace("(changed)", "\033[1m(changed)\033[0m"))
+    return "\n".join(out)
+
+
 def main(argv: list[str] | None = None) -> int:
     config_error = None
     try:
@@ -425,7 +449,7 @@ def main(argv: list[str] | None = None) -> int:
                     lines, data, rc = onboard.setup(args)
                 else:
                     lines, data, rc = onboard.doctor(args, config_error)
-                print(json.dumps(data, ensure_ascii=False, indent=2, default=str) if args.json else "\n".join(lines))
+                print(json.dumps(data, ensure_ascii=False, indent=2, default=str) if args.json else _paint("\n".join(lines)))
                 return rc
             elif args.cmd == "login":
                 lines, data = login_cmd(args, lan)
@@ -437,7 +461,7 @@ def main(argv: list[str] | None = None) -> int:
         except NasError as e:
             print(f"nas: {e}", file=sys.stderr)
             return e.exit_code
-        print(json.dumps(data, ensure_ascii=False, indent=2) if args.json else "\n".join(lines))
+        print(json.dumps(data, ensure_ascii=False, indent=2) if args.json else _paint("\n".join(lines)))
         return 0
     fn = COMMANDS[args.cmd][0]
     pushing = args.cmd == "alert" and bool(args.push)
@@ -484,5 +508,5 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
     else:
-        print("\n".join(lines))
+        print(_paint("\n".join(lines)))
     return rc

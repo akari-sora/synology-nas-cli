@@ -2,9 +2,13 @@
 
 **Audit a Synology NAS against the C3RB3R / `.L0CK3D` ransomware campaign with one command, fix what it finds with a second, and keep running DSM from the terminal afterwards.**
 
+[English](README.md) · [繁體中文](README.zh-TW.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Deutsch](README.de.md) · [Español](README.es.md) · [Français](README.fr.md)
+
 [![Releases](https://img.shields.io/badge/releases-GitLab-fc6d26)](https://gitlab.com/aa22396584/synology-nas-cli/-/releases) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Canonical repository, releases and issues: https://gitlab.com/aa22396584/synology-nas-cli
+
+![nas incident: audit, plan, fix](docs/assets/demo.gif)
 
 `nas` is a zero-dependency Python CLI (standard library only, Python 3.8+, so it also runs on DSM itself) and stdio MCP server for the Synology DSM 7 Web API: status, health, logs, packages, volumes, Tailscale, DSM upgrades, scheduled health alerts pushed to a webhook, and an incident audit and remediation tool built during the October 2026 C3RB3R / `.L0CK3D` campaign against internet-exposed Synology NAS boxes (Synology-SA-24:20, SA-26:13, SA-26:14).
 
@@ -24,7 +28,6 @@ Not affiliated with Synology Inc. "Synology", "DSM" and "QuickConnect" are trade
 - [Command reference summary](#command-reference-summary)
 - [What changes the NAS](#what-changes-the-nas)
 - [Tests](#tests)
-- [繁體中文說明](#繁體中文說明)
 
 ## Hand it to your agent
 
@@ -65,6 +68,15 @@ Use https://github.com/akari-sora/synology-nas-cli to audit and fix my Synology 
    - Review the dry-run plan before `nas incident fix --yes` runs (and choose whether to include `--rotate-password` or `--upgrade`).
 
 Full agent specification: [`docs/AGENT-RUNBOOK.md`](docs/AGENT-RUNBOOK.md).
+
+```mermaid
+flowchart LR
+    A["nas incident<br/>read-only audit"] --> B["nas incident fix --dry-run<br/>plan: before → after"]
+    B --> C["nas incident fix --yes<br/>apply, read back, audit again"]
+    C --> D["nas alert-deploy<br/>check every 10 min → webhook"]
+    A -.->|files being encrypted| E["nas incident contain<br/>freeze the encryptor"]
+    E --> F["nas incident rescue<br/>memory capture → key search"]
+```
 
 ## What it checks and fixes
 
@@ -423,104 +435,6 @@ tests/smoke_live.sh       # optional: read-only commands against your NAS (uses 
 ```
 
 ---
-
-## 繁體中文說明
-
-**一個指令檢查 Synology NAS 是否有 C3RB3R／`.L0CK3D` 勒索軟體攻擊活動相關的弱點與入侵指標，第二個指令依計畫把問題修好；日常也能直接在終端機或透過 AI Agent 管理與監控 DSM。**
-
-`nas` 是僅依賴 Python 標準函式庫（Python 3.8+，因此也能直接在 DSM 內建環境執行）的命令列工具與 MCP 伺服器，支援 DSM 7 Web API：系統狀態、硬碟與儲存空間健康度、連線紀錄、套件管理、儲存空間 `noatime`、Tailscale、DSM 自動下載與升級、排程健康檢查與 Webhook 推播，以及針對 2026 年 C3RB3R／`.L0CK3D` 勒索攻擊（Synology-SA-24:20、SA-26:13、SA-26:14）設計的唯讀稽核與一鍵修復流程。本專案與 Synology Inc. 無關。
-
-### 交給 AI Agent 自動執行
-
-把以下提示詞貼給 Claude Code、Codex、Cursor、Gemini CLI、Grok Bot 或任何支援工具呼叫的 AI Agent（Grok Bot 的雲端電腦／裝了 App 的電腦怎麼跑 `nas`、skills、警報例行任務：[`docs/GROK-BOT.md`](docs/GROK-BOT.md)）：
-
-```text
-使用 https://github.com/akari-sora/synology-nas-cli 檢查並修復我的 Synology NAS（位址：https://192.0.2.10:5001），照著 docs/AGENT-RUNBOOK.md 的步驟執行。
-```
-
-#### Agent 會依序執行的步驟
-
-1. **安裝**：複製此儲存庫（或用 `pip` 安裝）並執行 `./bin/nas --version` 確認環境。
-2. **`nas setup`**：執行 `nas setup --json --no-input ...` 寫入 `~/.config/synology-nas-cli/config.json`（權限 `0600`）、進行首次登入驗證，並在首次連線時釘選（pin）DSM 的 TLS 憑證 SHA-256 指紋。
-3. **`nas doctor`**：執行 `nas doctor --json` 檢查設定檔、憑證來源、連線可達性、TLS 指紋、登入狀態、DSM 版本（比對 SA-26:13）、兩步驟驗證（2FA）、管理員權限與系統時鐘偏差。
-4. **`nas incident`**：執行 `nas incident --json`（可加 `--probe --scan`）進行唯讀安全稽核。
-5. **產生修復計畫**：執行 `nas incident fix --dry-run --json --ransom-scan`，列出每一項變更的前後對照（`before -> after`）、實際會發送的 DSM API 呼叫與 DSM 網頁介面路徑。
-6. **套用修復（`nas incident fix --yes`）**：依安全順序套用修復、逐項讀回設定確認生效，並重跑一次稽核輸出前後對比。
-7. **進階入侵指標檢查與監控部署（選用）**：執行 `nas incident --deep --json`（透過暫時性 root 排程任務執行唯讀腳本，檢查 root 專屬日誌、排程、可疑執行檔、帳號、SSH 金鑰與程序）以及 `nas alert-deploy --json --test`（每 10 分鐘自動檢查並推播異常到 Webhook）。
-
-#### 使用者沿途只需提供的資訊
-
-1. **NAS 位址與帳號（一次）**：DSM 網址（例如 `https://192.0.2.10:5001`）、管理員帳號名稱、密碼來源（1Password `op://VAULT/ITEM/password`、密碼指令或系統鑰匙圈）、防火牆要放行的區網／VPN 網段（例如 `192.0.2.0/24`），以及供 `--deep` 與 `alert-deploy` 暫存檔案的共用資料夾路徑（例如 `/docker/.nas-cli-deploy`）。
-2. **兩步驟驗證碼（若帳號已啟用 2FA，僅需一次）**：當 `nas setup` 回報需要 `otp` 時提供當下的 6 位數驗證碼；加上 `--trust-device` 後會儲存 DSM 的信任裝置權杖，之後執行不需再輸入驗證碼。
-3. **確認修復計畫**：檢視 `--dry-run` 列出的變更內容（並決定是否加上選用的 `--rotate-password` 換密碼或 `--upgrade` 升級 DSM）。
-
-### `nas incident` 檢查項目與 `nas incident fix` 修復內容
-
-| 項目 | `nas incident` 檢查內容 | `nas incident fix` 變更內容 |
-|---|---|---|
-| `dsm_version` | DSM 版本是否低於 SA-26:13 修補版本，或處於無修補程式的舊分支（DSM 7.1 及更舊版本） | 加 `--upgrade` 時自動下載官方最新 `.pat`、執行 PreCheck 並安裝重開機 |
-| `sa_26_14_packages` | Calendar、MailStation、PHP 7.3–8.4 是否低於 SA-26:14 修補版本（執行中為 `FAIL`，已停止為 `WARN`） | 停止正在執行的未修補套件（`--only packages`） |
-| `firewall` | 防火牆未開（NAS 自己撥 PPPoE 持有公網 IP 時為 `FAIL`），或開啟但介面預設允許未比對流量、規則允許任意來源（`source_ip: all`） | 啟用防火牆、在區網介面放行本機 `/32`（依 DSM 連線紀錄）與 `allowed_networks` 的 IPv4 網段、將所有非 `global` 介面設為預設丟棄（`drop`），並移除允許任意來源的規則（`--only firewall`） |
-| `quickconnect` | QuickConnect 或其自動路由器連接埠轉送開啟 | 關閉 QuickConnect 與其 UPnP 自動連接埠轉送（`--only quickconnect`） |
-| `router_port_forwarding` | DSM 在路由器上設有啟用中的 UPnP／NAT-PMP 連接埠轉送規則 | 停用 DSM 管理的路由器連接埠轉送規則（`--only router_port_forwarding`） |
-| `public_ports` | 搭配 `--probe`：從本機對 NAS 公網位址測試 DSM 與檔案服務連接埠是否可連上 | 透過 `firewall`、`quickconnect` 與 `router_port_forwarding` 關閉暴露面 |
-| `external_signins` | 連線紀錄中是否有來自 `allowed_networks` 以外的成功登入紀錄 | 不自動修改（需人工調查是否遭入侵，見 [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md)） |
-| `failed_signins` | 過去 `--hours`（預設 24 小時）內登入失敗次數超過 `--failed-threshold`（預設 20 次） | 透過 `firewall` 與 `autoblock` 阻擋 |
-| `autoblock` | 自動封鎖（AutoBlock）未啟用 | 啟用自動封鎖（5 分鐘內失敗 10 次永久封鎖），並將本機 IP 與 `allowed_networks` 加入允許清單（若設定 `incident.autoblock_allow_loopback` 亦會加入 `127.0.0.1`）（`--only autoblock`） |
-| `smb_min_protocol` | 允許 SMB1（SMB 啟用時為 `FAIL`） | 將 SMB 最低通訊協定調升為 SMB2（`--only smb_min_protocol`） |
-| `admin_account` | 內建 `admin` 帳號仍處於啟用狀態 | 確認目前非以 `admin` 登入且另有其他啟用中的管理員後，透過暫時性 root 排程任務停用 `admin`（`--only admin_account`） |
-| `snapshot_schedule:<share>` | 各共用資料夾是否未設排程快照、排程停用，或最近一次排程快照超過 `snapshot_max_age_hours`（26 小時） | 為尚無排程的共用資料夾建立每日快照排程與 14 天保留原則；需同次執行乾淨的 `--ransom-scan` 或加 `--i-know-snapshots-may-rotate`（`--only snapshots`） |
-| `snapshot_worm:<share>` | 在不支援不可變快照（WORM）的機型上誤開 WORM 鎖定（DSM API 會回傳成功，但排程快照會從此靜默停擺） | 關閉不支援機型上的 WORM 鎖定，讓排程快照恢復運作（`--only snapshot_worm`） |
-| `ransomware_files` | 搭配 `--scan`：透過 File Station 搜尋所有共用資料夾是否有 `*.L0CK3D`、`*.LOCK3D` 或 `read-me3.txt` | 不自動修改（若為 `FAIL` 請立即隔離並依 [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md) 處置） |
-| `exploit_attempts` | 掃描連線紀錄是否有 CVE-2024-10441 登入注入字串（`PLUGIN_VALUE_END`、`LD_PRELOAD=`、`LD_DEBUG_OUTPUT`）或 `incident.ioc_ips` | 不自動修改（可進一步執行 `--deep` 確認是否成功植入） |
-| `exploit_attempts_logs`、`ioc_cron`、`ioc_binaries`、`ioc_users`、`ioc_ssh_keys`、`ioc_processes` | 搭配 `--deep`：執行唯讀 root 收集器檢查 `/var/log/synoplugin.log*`、`synoscgi.log*`、`auth.log*`、`/etc/cron.d/synot*`、`/bin/libgld`、`/bin/qnetd`、`/bin/l0ck.enc`、異常帳號、`authorized_keys` 與 `/proc` 程序／外部連線 | 不自動修改（若為 `FAIL` 請依 [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md) 進行事件應變） |
-
-### 正在被加密時：`nas incident contain`、`nas incident rescue`
-
-- `nas incident contain`：列出疑似加密程式的程序（`libgld`、`qnetd`、從暫存資料夾執行的程式、以寫入模式開著 `*.L0CK3D` 或 `read-me3.txt` 的程序）。沒加 `--yes`／`NAS_YES=1` 時不送任何訊號。執行檔在 Synology 路徑下的程序，除了開著的檔案之外還需要另一個理由才會列入（列在 `skipped`，附上加入用的 `--pid`）。PID 1、核心執行緒、掃描腳本本身與其上層程序一律不送訊號（`--pid` 也一樣）。
-- `nas incident contain --yes --stop-sync`：對掃描列出的程序（PID、啟動時間、執行檔都相同者）送 `SIGSTOP`（所有執行緒，逐一確認狀態為 `T`），讓金鑰留在記憶體裡；同時停止執行中的 Cloud Sync、Synology Drive、Hyper Backup 和 Container Manager 套件（停止 Container Manager 會停止所有容器），停掉的套件記錄在本機工作階段快取旁的 `contain-packages.json`。
-- `--save-exe DIR` 另存執行檔與 sha256；`nas incident contain --release` 對記錄的 PID 送 `SIGCONT`，並啟動 `--stop-sync` 停掉的套件（容器依各自的重新啟動原則回來）。
-- `nas incident rescue --yes --capture-dir /usbshare1/rescue`：用 [soimy/c3rb3r-rescue](https://github.com/soimy/c3rb3r-rescue)（執行時依 `incident.rescue_commit` 下載）一路做完：凍結 → 取得工具並核對 commit → 在 NAS 上以 root 對每個凍結的 PID 執行 `capture_process_memory.py`，寫到 `--capture-dir` 底下的新資料夾（須在 USB 硬碟或與受害資料不同的磁碟區，以 `/proc/self/mountinfo` 的掛載來源比對；同一磁碟區要加 `--force-same-volume`；路徑中有符號連結會被拒絕），完成後資料夾交給登入的 DSM 帳號（chown），File Station 才能列出與下載 → 檢查工作目錄空間後下載到本機 → 建 venv、以 `pip --require-hashes` 安裝固定版本套件並跑自我測試 → `recover_process_key.py` 找出金鑰候選（檔案權限 400，不會印出）。`--sample 檔案` 在副本上逐一試候選金鑰，`--decrypt-from 資料夾 --decrypt-to 目錄` 解密副本（沒有驗證過的候選金鑰時用 `--force-unverified-key`）。`--rescue-dir` 須是乾淨且在固定 commit 的工具副本（否則 `--force-unpinned-toolkit`）。`--force` 等於三個 `--force-*` 全開。每一步記錄在工作目錄的 `state.json`，同一個指令再跑一次會從中斷處繼續。
-
-### 安裝與環境設定
-
-```bash
-# 方式一：git clone 後直接執行（不需額外安裝套件）
-git clone https://gitlab.com/aa22396584/synology-nas-cli.git synology-nas-cli
-cd synology-nas-cli
-./bin/nas --help
-
-# 方式二：使用 pip 從 GitLab release 或本地目錄安裝
-pip install https://gitlab.com/aa22396584/synology-nas-cli/-/archive/v1.0.0/synology-nas-cli-v1.0.0.tar.gz
-# 或：pip install -e .
-
-# 方式三：Windows 使用 py 啟動器
-py -3 bin\nas --help
-py -3 -m pip install -e .
-```
-
-依作業系統與環境選擇設定方式：
-
-- **macOS 搭配 1Password**：`credentials.op_password` 填 `op://VAULT/ITEM/password`，透過 1Password App 授權 `op` 讀取密碼與 2FA 驗證碼。
-- **macOS 不使用 1Password**：執行 `nas login --save` 存入 macOS 鑰匙圈，或設 `password_command` 為 `security find-generic-password -s synology-nas -a USER -w`。
-- **Linux 伺服器／cron／systemd**：使用 1Password Service Account（`OP_SERVICE_ACCOUNT_TOKEN` 或 token 檔案）搭配 `op://`，或設 `password_command`（`secret-tool lookup ...`、`pass show ...`）。
-- **Windows**：以 PowerShell `CredentialManager` 模組儲存憑證，並在 `password_command` 呼叫 `Get-StoredCredential`，或使用環境變數 `NAS_USER` + `NAS_PASSWORD`。
-- **在 NAS 本機上執行**：使用 `--backend local`（由 DSM 任務排程表以 `root` 執行 `synowebapi --exec`，不需密碼；`nas alert-deploy` 會自動部署）。
-
-### 憑證、TLS、防火牆與 AutoBlock 重點
-
-- **憑證優先順序**：1Password（`op`）→ 外部指令（`command`）→ 系統鑰匙圈（`keychain`，由 `nas login --save` 寫入）→ 環境變數（`env`）→ 終端機互動輸入（`prompt`）。
-- **TLS 憑證釘選**：`password` 後端連線 DSM 絕不經過任何系統或環境變數 Proxy。預設 `tls.verify: false` 會在首次連線時將憑證 SHA-256 指紋寫入 `~/.config/synology-nas-cli/known-certs.json`（權限 `0600`）；之後若憑證變更會拒絕連線並以結束碼 `7` 停止。更新憑證後可執行 `nas trust --reset https://HOST:PORT`。
-- **防火牆防自鎖機制**：套用防火牆前會比對 DSM 連線紀錄中的登入來源 IP 與本機連線 IP；若經過 Proxy、來源為 loopback／IPv6／公網 IP 或兩者不一致，會暫緩套用並提示使用 `--force-firewall`。套用後會立即重新登入驗證；若失敗會列出救援方式（區網其他電腦、Synology Assistant、Tailscale userspace 模式、機身背面 RESET 鍵 Mode 1）。
-- **AutoBlock 注意事項**：DSM 預設 5 分鐘內登入失敗 10 次即封鎖來源 IP。`nas` 遇到密碼錯誤只會嘗試一次並立即停止，絕不重試。
-
-### MCP 伺服器、Skills 與監控推播
-
-- **MCP 伺服器**：執行 `nas mcp` 啟動 stdio MCP 伺服器（詳見 [`docs/MCP.md`](docs/MCP.md)）。
-- **Skills 安裝器**：執行 `./skills/install.sh`（Windows 為 `.\skills\install.ps1`）將 `synology-nas` 與 `synology-ransomware-response` 安裝至各 AI Agent 的技能目錄（支援 `--copy`、`--dry-run`、`--uninstall`）。
-- **排程監控與 Webhook**：`nas alert --push webhook.json` 僅在狀態變化、警告持續滿 24 小時或每日一次心跳時發送 POST；`nas alert-deploy --test` 可一鍵部署至 NAS 以 root 每 10 分鐘執行，並同步設定 DSM 內建通知 Webhook（詳見 [`docs/ALERTS.md`](docs/ALERTS.md)）。
-- **Grok Bot**：`nas` 可以跑在 Bot 的雲端電腦（透過 Tailscale 連 NAS），或裝了 Grok Bot App 的電腦；skills 用 `gbot skills add` 加入，警報接到 Bot 的例行任務 webhook（詳見 [`docs/GROK-BOT.md`](docs/GROK-BOT.md)）。
-- **更多文件**：[`docs/AGENT-RUNBOOK.md`](docs/AGENT-RUNBOOK.md)、[`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md)、[`docs/HARDENING.md`](docs/HARDENING.md)、[`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)、[`docs/DSM-API-NOTES.md`](docs/DSM-API-NOTES.md)、[`docs/EXIT-CODES.md`](docs/EXIT-CODES.md)。
 
 ## License
 

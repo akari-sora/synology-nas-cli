@@ -118,4 +118,20 @@ lines, data = upgrade.upgrade(us, types.SimpleNamespace(pat=pat, dry_run=False, 
                                                          ask_on_notes=True))
 assert data["action"] == "precheck-notes-not-confirmed" and ("SYNO.Core.Upgrade", "start") not in us.sent, us.sent
 assert ("SYNO.Core.Upgrade.Patch", "clean") in us.sent
+# colors: status words and suggested commands on a terminal only
+from nas import cli as _cli
+_sample = "FAIL  firewall  off\n      -> nas incident fix --only firewall\n  FAIL  -> PASS  firewall   (changed)\nSummary: 4 PASS, 1 SKIP"
+_tty = sys.stdout.isatty
+try:
+    sys.stdout.isatty = lambda: True
+    os.environ.pop("NO_COLOR", None)
+    painted = _cli._paint(_sample)
+    assert "\033[1;31mFAIL\033[0m" in painted and "\033[32mPASS\033[0m" in painted and "\033[2mSKIP\033[0m" in painted
+    assert "\033[36m      -> nas incident fix --only firewall\033[0m" in painted and "\033[1m(changed)" in painted
+    os.environ["NO_COLOR"] = "1"
+    assert _cli._paint(_sample) == _sample
+finally:
+    os.environ.pop("NO_COLOR", None)
+    sys.stdout.isatty = _tty
+assert _cli._paint(_sample) == _sample or sys.stdout.isatty(), "plain when stdout is not a terminal"
 print(f"offline checks ok (python {sys.version.split()[0]})")

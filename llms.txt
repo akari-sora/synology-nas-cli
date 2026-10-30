@@ -24,6 +24,8 @@
 
 ## Reference and repository layout
 
+- Translations: README.zh-TW.md, README.zh-CN.md, README.ja.md, README.ko.md, README.de.md, README.es.md, README.fr.md; docs/INCIDENT-C3RB3R.zh-TW.md, docs/INCIDENT-C3RB3R.zh-CN.md. Agent-facing docs (runbook, MCP, exit codes, skills) are English
+
 - [docs/GROK-BOT.md](docs/GROK-BOT.md): Grok Bot setup: `nas` on the bot's cloud computer over Tailscale or on a computer with the Grok Bot app, skills via `gbot skills add`, routine webhook alerts, and an example bot description
 
 - [docs/ALERTS.md](docs/ALERTS.md): `nas alert` codes, `--push` webhook payload, receivers, and `nas alert-deploy`
