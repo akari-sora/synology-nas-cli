@@ -41,6 +41,22 @@ COMMANDS = {
     "api": (commands.raw_api, "raw DSM API call (writes need --allow-write)"),
 }
 
+EPILOGS = {
+    "incident": """contain (first response while files are being encrypted):
+  nas incident contain                 list candidate encryptor processes (known names, executables in
+                                       /tmp, /dev/shm, /volume*/@tmp, open *.L0CK3D / read-me3.txt files,
+                                       high CPU outside Synology paths, incident.ioc_process_names)
+  nas incident contain --yes           SIGSTOP each candidate and verify every thread is stopped (T); D =
+                                       waiting on I/O, check again. Memory and keys stay in place for a
+                                       memory capture (https://github.com/soimy/c3rb3r-rescue)
+  --pid N (repeatable)                 add explicit PIDs
+  --stop-sync                          also stop Cloud Sync, Hyper Backup, Container Manager (recorded)
+  --save-exe DIR                       copy each candidate's executable into DIR on the NAS (root-only, 700)
+  --release                            SIGCONT the PIDs the last freeze recorded; start paused packages
+Runs as root through a temporary Task Scheduler task (--backend password, needs deploy.stage_dir) or
+directly with --backend local. JSON: schemas/incident-contain.schema.json.""",
+}
+
 NO_SESSION = ("config", "login", "logout", "trust", "mcp", "setup", "doctor")
 
 
@@ -69,7 +85,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="apply every override at once (--force-firewall, --force-admin, snapshot rotation, reinstall)")
     sub = p.add_subparsers(dest="cmd", required=True, metavar="command")
     for name, (_, help_text) in COMMANDS.items():
-        sp = sub.add_parser(name, help=help_text, description=help_text)
+        sp = sub.add_parser(name, help=help_text, description=help_text, epilog=EPILOGS.get(name),
+                            formatter_class=argparse.RawDescriptionHelpFormatter)
         if name == "ransom-scan":
             sp.add_argument("--timeout", type=int, default=3600, help="give up polling after N seconds")
             sp.add_argument("--pattern", help="override the glob list (comma-separated, one search task each), "
@@ -128,7 +145,8 @@ def build_parser() -> argparse.ArgumentParser:
             sp.add_argument("--test", action="store_true",
                             help="send DSM's test notification through the webhook")
         if name == "incident":
-            sp.add_argument("action", nargs="?", choices=["fix"], help="fix: apply the hardening (see --dry-run)")
+            sp.add_argument("action", nargs="?", choices=["fix", "contain"],
+                            help="fix: apply the hardening (see --dry-run); contain: freeze encryptor processes")
             sp.add_argument("--probe", action="store_true", help="TCP-probe the public address from this machine")
             sp.add_argument("--probe-timeout", type=float, default=1.5, help="seconds per TCP connect")
             sp.add_argument("--scan", action="store_true", help="search every share for ransom notes (minutes)")
@@ -140,6 +158,16 @@ def build_parser() -> argparse.ArgumentParser:
             sp.add_argument("--log-limit", type=int, default=10000, help="connection-log entries to read")
             sp.add_argument("--hours", type=int, default=24, help="window for the failed sign-in count")
             sp.add_argument("--failed-threshold", type=int, default=20, help="failed sign-ins that make a WARN")
+            c = sp.add_argument_group("incident contain")
+            c.add_argument("--pid", type=int, action="append", help="freeze this PID too (repeatable)")
+            c.add_argument("--release", action="store_true", help="SIGCONT the PIDs of the last freeze; restart "
+                                                                   "packages paused with --stop-sync")
+            c.add_argument("--stop-sync", action="store_true",
+                           help="also stop Cloud Sync, Hyper Backup and Container Manager (restarted by --release)")
+            c.add_argument("--save-exe", metavar="DIR", help="copy each candidate's executable into DIR on the NAS "
+                                                             "(created root-only, mode 700)")
+            c.add_argument("--cpu-threshold", type=float, default=50.0,
+                           help="average CPU %% that makes a process outside Synology paths a candidate")
             g = sp.add_argument_group("incident fix")
             g.add_argument("--dry-run", action="store_true", help="print the plan and the API calls; send no write")
             g.add_argument("--yes", action="store_true", help="apply without asking")

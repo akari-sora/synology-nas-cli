@@ -123,6 +123,10 @@ DEFAULTS = {
         "ioc_strings": [],
         # `--deep` ioc_users: local accounts (uid >= 1024) you know; admin and guest are always known.
         "allowed_users": [],
+        # `incident contain`: extra process names that count as encryptors, and where (on the NAS, root-only)
+        # the PIDs of the last freeze are kept for --release.
+        "ioc_process_names": [],
+        "contain_state_file": "/root/.nas-incident-contain.json",
     },
 }
 

@@ -1313,4 +1313,7 @@ def fix(s, args):
 def incident(s, args):
     if getattr(args, "action", None) == "fix":
         return fix(s, args)
+    if getattr(args, "action", None) == "contain":
+        from .contain import contain
+        return contain(s, args)
     return audit(s, args)

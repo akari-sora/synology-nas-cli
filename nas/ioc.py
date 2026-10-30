@@ -386,51 +386,61 @@ def collector_config(root: str = "") -> dict:
 
 def collect(s, root: str = "", timeout: float = 600) -> dict:
     """Run COLLECTOR as root and return its JSON (raises NasError)."""
+    return run_root_python(s, COLLECTOR, collector_config(root), "nas-incident-deep", "deep collector",
+                           root=root, timeout=timeout)
+
+
+def run_root_python(s, code: str, cfg: dict, task: str, what: str, root: str = "", timeout: float = 600) -> dict:
+    """Run a Python 3.8 script as root once and return the JSON it writes.
+
+    The script gets argv OUT TOKEN CFG and writes {"marker": TOKEN, ...} to OUT ("-" = stdout). With
+    --backend local (or `root` set, for tests) it runs here; with --backend password it runs in a temporary
+    root Task Scheduler task and writes OUT into deploy.stage_dir (O_EXCL|O_NOFOLLOW), which is read back
+    and deleted, as is the task."""
     token = secrets.token_hex(12)
-    cfg = json.dumps(collector_config(root))
+    cfg_s = json.dumps(cfg)
     if s.backend_name == "local" or root:
-        p = subprocess.run([sys.executable if root else "python3", "-I", "-B", "-", "-", token, cfg],
-                           input=COLLECTOR.encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+        p = subprocess.run([sys.executable if root else "python3", "-I", "-B", "-", "-", token, cfg_s],
+                           input=code.encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
         if p.returncode != 0:
-            raise NasError("deep collector failed: " + clean(p.stderr.decode("utf-8", "replace")[-400:], 400))
-        return _parse(p.stdout.decode("utf-8", "replace"), token)
+            raise NasError(f"{what} failed: " + clean(p.stderr.decode("utf-8", "replace")[-400:], 400))
+        return _parse(p.stdout.decode("utf-8", "replace"), token, what)
     if s.backend_name != "password":
-        raise NasError("--deep needs --backend password (a temporary root task) or --backend local on the NAS")
+        raise NasError(f"{what}: runs with --backend password (a temporary root task) or --backend local on the NAS")
     from .selfmon import _read_stage_file, _stage, run_root_script
     stage, stage_fs = _stage(s)
-    name = f"nas-deep-{token}.json"
+    name = f"{task}-{token}.json"
     s.call("SYNO.FileStation.CreateFolder", "create", version=2, params={
         "folder_path": json.dumps([stage.rsplit("/", 1)[0] or "/"]), "name": json.dumps([stage.rsplit("/", 1)[1]]),
         "force_parent": True})
-    script = task_script(stage_fs, name, token, cfg)
+    script = task_script(stage_fs, name, token, cfg_s, code)
     got = {}
 
     def done(s_):
         body = _read_stage_file(s_, stage, name)
         if body and body.rstrip().endswith("}"):
             try:
-                got["data"] = _parse(body, token)
-                return True
+                got["data"] = _parse(body, token, what)
             except NasError as e:
                 got["error"] = str(e)
-                return True
+            return True
         return False
 
     try:
-        ok = run_root_script(s, "nas-incident-deep", script, done=done, timeout=timeout)
+        ok = run_root_script(s, task, script, done=done, timeout=timeout)
     finally:
         s.call("SYNO.FileStation.Delete", "start", version=2,
                params={"path": json.dumps([f"{stage}/{name}"]), "recursive": False})
     if "error" in got:
         raise NasError(got["error"])
     if not ok or "data" not in got:
-        raise NasError(f"the deep collector wrote no result within {int(timeout)} s")
+        raise NasError(f"the {what} wrote no result within {int(timeout)} s")
     return got["data"]
 
 
-def task_script(stage_fs: str, name: str, token: str, cfg: str) -> str:
-    """Root task: refuse a symlinked staging folder, run COLLECTOR (zlib + base64 on stdin) once."""
-    blob = base64.b64encode(zlib.compress(COLLECTOR.encode(), 9)).decode()
+def task_script(stage_fs: str, name: str, token: str, cfg: str, code: str = COLLECTOR) -> str:
+    """Root task: stop on a symlinked staging folder, run the script (zlib + base64 on stdin) once."""
+    blob = base64.b64encode(zlib.compress(code.encode(), 9)).decode()
     lines = "\n".join(blob[i:i + 76] for i in range(0, len(blob), 76))
     return (f"umask 022\nS={shlex.quote(stage_fs)}\n"
             '[ -L "$S" ] && { echo "staging folder is a symlink"; exit 0; }\n'
@@ -438,13 +448,13 @@ def task_script(stage_fs: str, name: str, token: str, cfg: str) -> str:
             f"\"$S/{name}\" {shlex.quote(token)} {shlex.quote(cfg)} <<'B64'\n{lines}\nB64\n")
 
 
-def _parse(body: str, token: str) -> dict:
+def _parse(body: str, token: str, what: str = "deep collector") -> dict:
     try:
         d = json.loads(body)
     except ValueError:
-        raise NasError("deep collector result is not JSON")
+        raise NasError(f"{what} result is not JSON")
     if not isinstance(d, dict) or d.get("marker") != token:
-        raise NasError("deep collector result has the wrong marker (not written by this run)")
+        raise NasError(f"{what} result has the wrong marker (not written by this run)")
     return d
 
 

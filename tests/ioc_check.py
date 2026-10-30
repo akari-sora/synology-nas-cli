@@ -160,7 +160,7 @@ class DeepSession(FakeSession):
             return ok({"shares": [{"name": "files", "additional": {"real_path": "/volume1/files"}}]})
         if (api, method) == ("SYNO.Core.TaskScheduler", "run"):
             script = self.nas.st["tasks"][p["tasks"][0]["id"]]["script"]
-            m = re.search(r'"\$S/(nas-deep-[0-9a-f]+\.json)" (\S+)', script)
+            m = re.search(r'"\$S/(nas-incident-deep-[0-9a-f]+\.json)" (\S+)', script)
             assert m and "/volume1/files/.nas-cli-deploy" in script and '[ -L "$S" ]' in script, script[:300]
             assert len(script) < 9000, len(script)
             self.files[m.group(1)] = json.dumps(dict(canned, marker=m.group(2) if self.marker_ok else "other"))
@@ -169,7 +169,7 @@ class DeepSession(FakeSession):
         return super().call(api, method, params, version, timeout)
 
     def http_raw(self, path, **kw):
-        name = re.search(r"nas-deep-[0-9a-f]+\.json", __import__("urllib.parse").parse.unquote(path))
+        name = re.search(r"nas-incident-deep-[0-9a-f]+\.json", __import__("urllib.parse").parse.unquote(path))
         body = self.files.get(name.group(0)) if name else None
         return (200, {}, body, {}) if body else (404, {}, '{"error":{"code":408}}', {})
 

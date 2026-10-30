@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:synology-nas-cli:schema:incident-contain",
+  "title": "nas --json incident contain",
+  "type": "object",
+  "required": [
+    "mode"
+  ],
+  "properties": {
+    "mode": {
+      "enum": [
+        "scan",
+        "freeze",
+        "release"
+      ]
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/process"
+      }
+    },
+    "frozen": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/state"
+      }
+    },
+    "released": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/state"
+      }
+    },
+    "paused": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/package"
+      }
+    },
+    "resumed": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/package"
+      }
+    },
+    "saved": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "pid",
+          "path",
+          "sha256"
+        ]
+      }
+    },
+    "state_file": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "next_steps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "process": {
+      "type": "object",
+      "required": [
+        "pid",
+        "exe",
+        "cmdline",
+        "cpu",
+        "threads",
+        "open_ransom_files",
+        "evidence",
+        "reasons"
+      ],
+      "properties": {
+        "pid": {
+          "type": "integer"
+        },
+        "exe": {
+          "type": "string"
+        },
+        "comm": {
+          "type": "string"
+        },
+        "cmdline": {
+          "type": "string"
+        },
+        "cpu": {
+          "type": "number"
+        },
+        "threads": {
+          "type": "integer"
+        },
+        "open_ransom_files": {
+          "type": "integer"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "container": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "required": [
+        "pid",
+        "ok"
+      ],
+      "properties": {
+        "pid": {
+          "type": "integer"
+        },
+        "threads": {
+          "type": "integer"
+        },
+        "stopped": {
+          "type": "integer"
+        },
+        "io_wait": {
+          "type": "integer",
+          "description": "threads in state D (waiting on I/O)"
+        },
+        "other": {
+          "type": "integer"
+        },
+        "gone": {
+          "type": "boolean"
+        },
+        "ok": {
+          "type": "boolean"
+        }
+      }
+    },
+    "package": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "stopped": {
+          "type": "boolean"
+        },
+        "started": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}
