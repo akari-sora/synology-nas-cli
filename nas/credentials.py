@@ -33,7 +33,7 @@ import subprocess
 import sys
 
 from . import config
-from .errors import NasError
+from .errors import InputRequired, NasError, can_prompt
 
 SOURCES = ("op", "command", "keychain", "env", "prompt")
 
@@ -71,7 +71,7 @@ class Credentials:
         self.cfg = (cfg or config.get())["credentials"]
         self.run = run or subprocess.run
         self.getpass = getpass or _getpass.getpass
-        self.isatty = isatty or (lambda: sys.stdin.isatty())
+        self.isatty = isatty or can_prompt
         self.which = which or shutil.which
         self.environ = os.environ if environ is None else environ
         self.platform = platform or sys.platform
@@ -243,8 +243,8 @@ class Credentials:
         elif self.isatty():
             self._source = "prompt"
         else:
-            raise NasError(
-                "no DSM credentials configured. Pick one: credentials.op_password (1Password), "
+            raise InputRequired(
+                "no DSM credentials configured and no prompt possible (--no-input, NAS_NO_INPUT or no terminal). Pick one: credentials.op_password (1Password), "
                 "NAS_PASSWORD_COMMAND / credentials.password_command, `nas login --save` (keychain), "
                 "NAS_USER + NAS_PASSWORD, or run in a terminal to be prompted. See README 'Credentials'.")
         return self._source
@@ -271,7 +271,7 @@ class Credentials:
             user = sys.stdin.readline().strip()
             if user:
                 return user
-        raise NasError("no DSM username: set NAS_USER or credentials.username")
+        raise InputRequired("no DSM username and no prompt possible: set NAS_USER or credentials.username")
 
     def password(self, user: str | None = None) -> str:
         if self._password is not None:
@@ -304,7 +304,8 @@ class Credentials:
                 raise NasError("credentials.source is env but NAS_PASSWORD is empty")
             return v
         if not self.isatty():
-            raise NasError("credentials.source is prompt but stdin is not a terminal")
+            raise InputRequired("credentials.source is prompt but no prompt is possible (--no-input, NAS_NO_INPUT "
+                                "or no terminal)")
         self._password = self.getpass(f"DSM password for {user or 'the account'}: ")
         return self._password
 

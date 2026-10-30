@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:synology-nas-cli:schema:whoami",
+  "title": "nas --json whoami",
+  "type": "object",
+  "required": [
+    "backend",
+    "origin",
+    "account",
+    "is_admin",
+    "dsm"
+  ],
+  "properties": {
+    "backend": {
+      "enum": [
+        "password",
+        "chrome",
+        "local"
+      ]
+    },
+    "origin": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "credentials": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "op_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "session": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "account": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "is_admin": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "hostname": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "dsm": {
+      "type": "string"
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

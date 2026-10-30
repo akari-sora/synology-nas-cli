@@ -10,6 +10,7 @@ import traceback
 
 from . import __version__, alert, commands, config, incident, manage, selfmon, upgrade
 from .backends import NasError, PasswordBackend, open_session
+from .errors import set_no_input
 from .credentials import Credentials
 
 COMMANDS = {
@@ -34,10 +35,11 @@ COMMANDS = {
     "logout": (None, "end the cached session; --forget also removes the keychain entry and trusted-device token"),
     "config": (None, "config init (write an example file) | config show (effective config, secrets masked)"),
     "trust": (None, "list the DSM certificates trusted on first use; --reset ORIGIN forgets one"),
+    "mcp": (None, "Model Context Protocol server on stdin/stdout (for AI agents; see docs/MCP.md)"),
     "api": (commands.raw_api, "raw DSM API call (writes need --allow-write)"),
 }
 
-NO_SESSION = ("config", "login", "logout", "trust")
+NO_SESSION = ("config", "login", "logout", "trust", "mcp")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -56,6 +58,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--op-item", help="1Password item op://VAULT/ITEM with fields username/password "
                                      "(overrides credentials.op_username/op_password)")
     p.add_argument("--json", action="store_true", help="machine-readable output")
+    p.add_argument("--no-input", action="store_true",
+                   help="never prompt or wait for confirmation; fail with exit code 3 instead (also NAS_NO_INPUT=1, "
+                        "and automatic when stdin is not a terminal)")
     sub = p.add_subparsers(dest="cmd", required=True, metavar="command")
     for name, (_, help_text) in COMMANDS.items():
         sp = sub.add_parser(name, help=help_text, description=help_text)
@@ -260,12 +265,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"nas: {e}", file=sys.stderr)
         return 2
     args = parse_args(argv)
+    if args.no_input:
+        set_no_input(True)
     lan = ([o.strip().rstrip("/") for x in args.lan_origin for o in x.split(",") if o.strip()]
            if args.lan_origin else None)
     origins = [o.rstrip("/") for o in args.origin] if args.origin else None
     if args.op_item:
         config.get()["credentials"]["op_username"] = args.op_item.rstrip("/") + "/username"
         config.get()["credentials"]["op_password"] = args.op_item.rstrip("/") + "/password"
+    if args.cmd == "mcp":
+        from .mcp import serve
+        return serve(sys.stdin, sys.stdout, lambda: open_session(args.backend, origins, lan, renew=True))
     if args.cmd in NO_SESSION:
         try:
             if args.cmd == "config":
@@ -278,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
                 lines, data = logout_cmd(args, lan)
         except NasError as e:
             print(f"nas: {e}", file=sys.stderr)
-            return 1
+            return e.exit_code
         print(json.dumps(data, ensure_ascii=False, indent=2) if args.json else "\n".join(lines))
         return 0
     fn = COMMANDS[args.cmd][0]
@@ -314,7 +324,7 @@ def main(argv: list[str] | None = None) -> int:
                       file=sys.stderr)
             except Exception as e2:
                 print(f"nas: push_failure: {e2}", file=sys.stderr)
-        return 1
+        return e.exit_code if isinstance(e, NasError) else 1
     except KeyboardInterrupt:
         return 130
     finally:

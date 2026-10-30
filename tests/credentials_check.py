@@ -114,7 +114,19 @@ c = creds({}, env={"NAS_USER": "ops", "NAS_PASSWORD": "env-pw"})
 assert c.source() == "env" and c.password() == "env-pw"
 c = creds({"username": "ops"}, tty=True, typed="typed")
 assert c.source() == "prompt" and c.password("ops") == "typed" and c.password("ops") == "typed"
-expect_error(creds({"username": "ops"}).source, "no DSM credentials configured", "NAS_PASSWORD_COMMAND")
+msg = expect_error(creds({"username": "ops"}).source, "no DSM credentials configured", "NAS_PASSWORD_COMMAND")
+from nas.errors import InputRequired, can_prompt, set_no_input
+try:
+    creds({"username": "ops"}).source()
+except InputRequired as e:
+    assert e.exit_code == 3
+# --no-input / NAS_NO_INPUT switch prompting off even on a terminal
+set_no_input(True)
+assert not can_prompt()
+set_no_input(False)
+os.environ["NAS_NO_INPUT"] = "1"
+assert not can_prompt()
+del os.environ["NAS_NO_INPUT"]
 # forcing a source
 c = creds({"source": "env", "op_password": "op://V/I/password"}, env={"NAS_PASSWORD": "forced"})
 assert c.source() == "env" and c.password() == "forced"
@@ -201,8 +213,22 @@ assert not dsm.valid and not os.path.exists(config.path(config.get()["session"][
 # wrong password: one attempt, no retry (AutoBlock counts every failure)
 dsm = FakeDSM()
 bad = creds({"username": "ops", "password_command": "x"}, Run({"x": (0, "wrong\n")}))
-expect_error(lambda: backend(dsm, bad).call_many(sysinfo), "code 400", "AutoBlock")
+from nas.errors import AuthFailed, Blocked
+try:
+    backend(dsm, bad).call_many(sysinfo)
+    raise AssertionError("wrong password accepted")
+except AuthFailed as e:
+    assert e.exit_code == 4 and "code 400" in str(e) and "AutoBlock" in str(e)
 assert len(dsm.logins) == 1
+
+# AutoBlock: 407 is its own exit code
+blocked = FakeDSM()
+blocked.http = lambda path, fields=None, timeout=60: {"success": False, "error": {"code": 407}}
+try:
+    backend(blocked, pw).call_many(sysinfo)
+    raise AssertionError("blocked login accepted")
+except Blocked as e:
+    assert e.exit_code == 5 and "AutoBlock" in str(e)
 
 # 2FA: 403 -> one retry with the code; --trust-device stores DSM's device id and later logins send it
 dsm = FakeDSM(need_otp=True)

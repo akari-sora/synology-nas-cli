@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:synology-nas-cli:schema:incident-fix",
+  "title": "nas --json incident fix",
+  "type": "object",
+  "required": [
+    "before",
+    "plan"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "before": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/item"
+      }
+    },
+    "plan": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/change"
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/result"
+      }
+    },
+    "after": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/item"
+      }
+    },
+    "after_error": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "item": {
+      "type": "object",
+      "required": [
+        "id",
+        "status",
+        "detail",
+        "hint",
+        "fix"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "item name; per-share items are 'name:share'"
+        },
+        "status": {
+          "enum": [
+            "PASS",
+            "WARN",
+            "FAIL",
+            "SKIP"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "hint": {
+          "type": "string"
+        },
+        "fix": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "incident fix name that addresses it"
+        }
+      }
+    },
+    "change": {
+      "type": "object",
+      "required": [
+        "fix",
+        "target",
+        "before",
+        "after",
+        "calls",
+        "note",
+        "refused"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "fix": {
+          "enum": [
+            "snapshot_worm",
+            "snapshots",
+            "packages",
+            "smb_min_protocol",
+            "quickconnect",
+            "router_port_forwarding",
+            "autoblock",
+            "admin_account",
+            "firewall",
+            "rotate_password",
+            "upgrade"
+          ]
+        },
+        "target": {
+          "type": "string"
+        },
+        "before": {
+          "type": "string"
+        },
+        "after": {
+          "type": "string"
+        },
+        "calls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/call"
+          }
+        },
+        "note": {
+          "type": "string"
+        },
+        "refused": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "why this change will not be made"
+        }
+      }
+    },
+    "call": {
+      "type": "object",
+      "required": [
+        "api",
+        "method",
+        "version",
+        "params"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "api": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "params": {
+          "type": "object"
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "required": [
+        "fix",
+        "target",
+        "ok",
+        "now"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "fix": {
+          "enum": [
+            "snapshot_worm",
+            "snapshots",
+            "packages",
+            "smb_min_protocol",
+            "quickconnect",
+            "router_port_forwarding",
+            "autoblock",
+            "admin_account",
+            "firewall",
+            "rotate_password",
+            "upgrade"
+          ]
+        },
+        "target": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "now": {
+          "type": "string",
+          "description": "state read back after the change"
+        }
+      }
+    }
+  }
+}

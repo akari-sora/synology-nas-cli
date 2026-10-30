@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:synology-nas-cli:schema:health",
+  "title": "nas --json health",
+  "type": "object",
+  "required": [
+    "disks",
+    "pools",
+    "volumes",
+    "ups"
+  ],
+  "properties": {
+    "disks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "smart"
+        ],
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "smart": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "temp_c": {
+            "type": [
+              "number",
+              "string",
+              "null"
+            ]
+          },
+          "size": {
+            "type": "string"
+          },
+          "bad_sectors": {
+            "type": [
+              "number",
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "pools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "status"
+        ]
+      }
+    },
+    "volumes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "status"
+        ]
+      }
+    },
+    "ups": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "cpu": {
+      "type": "object",
+      "properties": {
+        "load": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "memory": {
+      "type": "object"
+    },
+    "system": {
+      "type": "object"
+    }
+  }
+}

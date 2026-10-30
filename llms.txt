@@ -1,0 +1,24 @@
+# synology-nas-cli
+
+> `nas`: a Python (stdlib, 3.8+) CLI and MCP server for a Synology NAS (DSM 7 Web API): status, health, logs, packages, alerts, and a read-only audit plus a planned, confirmable fix for the C3RB3R / .L0CK3D ransomware campaign (Synology-SA-26:13, SA-26:14). Not affiliated with Synology.
+
+## Start here
+
+- [README.md](README.md): install, configuration keys, credential chain, commands, `incident` items and the `incident fix` table
+- [CLAUDE.md](CLAUDE.md): code layout and conventions for working on the repository (AGENTS.md is the same file)
+
+## Using it from an agent
+
+- [docs/MCP.md](docs/MCP.md): `nas mcp` tools, arguments, result format, client configuration
+- [docs/EXIT-CODES.md](docs/EXIT-CODES.md): exit codes (3 input required, 4 login failed, 5 AutoBlock, 6 unreachable, 7 certificate changed)
+- [schemas/](schemas/): JSON Schemas of `--json` output (incident, incident-fix, alert, status, health, whoami)
+- [skills/synology-nas/SKILL.md](skills/synology-nas/SKILL.md): operating the NAS with `nas`
+- [skills/synology-ransomware-response/SKILL.md](skills/synology-ransomware-response/SKILL.md): incident playbook
+- [skills/install.sh](skills/install.sh) / [skills/install.ps1](skills/install.ps1): install the skills into agent skill folders
+
+## Reference
+
+- [docs/INCIDENT-C3RB3R.md](docs/INCIDENT-C3RB3R.md): the campaign, advisories, response checklist
+- [docs/DSM-API-NOTES.md](docs/DSM-API-NOTES.md): DSM Web API behaviour (parameter encoding, error codes, firewall, AutoBlock, snapshots, root tasks)
+- [docs/ALERTS.md](docs/ALERTS.md): alert codes, webhook body, deployment paths
+- [config.example.json](config.example.json): example configuration

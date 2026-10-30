@@ -20,6 +20,8 @@ Not affiliated with Synology Inc. "Synology", "DSM" and "QuickConnect" are trade
 - [Tests](#tests)
 - [繁體中文說明](#繁體中文說明)
 
+For AI agents: [`docs/MCP.md`](docs/MCP.md) (`nas mcp`), [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md), [`schemas/`](schemas/) (JSON Schemas of `--json` output), [`llms.txt`](llms.txt), `skills/install.sh` / `skills/install.ps1` (install the skills into `~/.claude/skills`, `~/.cursor/skills`, `~/.codex/skills`, `~/.agents/skills`, `~/.grok/skills`, `~/.gemini/skills`, `~/.config/opencode/skills`, `~/.hermes/shared-skills` where present; `--copy`, `--dry-run`, `--uninstall`).
+
 Further reading: [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md) (the campaign and a response checklist), [`docs/ALERTS.md`](docs/ALERTS.md) (alert codes, webhook body, deployment paths), [`docs/DSM-API-NOTES.md`](docs/DSM-API-NOTES.md) (DSM Web API behaviour this tool relies on), and the agent skills in [`skills/`](skills/).
 
 ## What `nas incident` checks
@@ -230,6 +232,8 @@ nas config init [--force] | nas config show
 nas trust | nas trust --reset https://HOST:PORT                # TLS certificates trusted on first use
 nas api SYNO.Core.System info --version 1                     # any DSM API; writes need --allow-write
 nas --json <command>                                          # JSON output for everything
+nas --no-input <command>                                      # never prompt; exit 3 when input would be needed (also NAS_NO_INPUT=1; automatic without a terminal)
+nas mcp                                                       # MCP server on stdio (docs/MCP.md)
 ```
 
 ## Alerts and webhooks

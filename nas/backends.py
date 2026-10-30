@@ -26,7 +26,7 @@ import urllib.request
 
 from . import config
 from .credentials import Credentials
-from .errors import NasError
+from .errors import AuthFailed, Blocked, CertificateChanged, NasError, Unreachable
 
 __all__ = ["NasError", "describe_error", "open_session", "Session", "PasswordBackend", "ChromeBackend",
            "LocalBackend"]
@@ -244,7 +244,7 @@ def _host_port(origin: str) -> tuple[str, int]:
 
 # --- TLS: no proxies, and trust on first use for self-signed DSM certificates ---
 
-class PinMismatch(NasError):
+class PinMismatch(CertificateChanged):
     pass
 
 
@@ -331,7 +331,7 @@ class PasswordBackend:
     RENEW_CODES = (106, 107, 119)
 
     def __init__(self, origins: list[str], creds: Credentials | None = None, cfg: dict | None = None,
-                 use_cache: bool = True):
+                 use_cache: bool = True, renew: bool = False):
         self.cfg = cfg or config.get()
         self.origins = [o.rstrip("/") for o in origins if o]
         self.origin = None
@@ -343,6 +343,7 @@ class PasswordBackend:
         self._token = None
         self.session_kind = None  # "login" (this process), "cache" (nas login) or "env" (NAS_SID)
         self.trust_device = bool(self.cfg["session"].get("trust_device"))
+        self.renew = renew  # long-lived processes (nas mcp): log in again when DSM drops the session
         if use_cache:
             self._adopt_session()
 
@@ -458,7 +459,7 @@ class PasswordBackend:
                 continue
             self.origin = o
             return o
-        raise NasError("no DSM origin reachable (" + "; ".join(errors) + "). "
+        raise Unreachable("no DSM origin reachable (" + "; ".join(errors) + "). "
                        "Set NAS_ORIGINS (comma-separated), --lan-origin, or origins in the config.")
 
     def op_item_json(self, ref: str) -> dict:
@@ -559,7 +560,8 @@ class PasswordBackend:
         if not r.get("success"):
             code = (r.get("error") or {}).get("code")
             hint = LOGIN_HINTS.get(code, "")
-            raise NasError("DSM login failed: "
+            cls = Blocked if code == 407 else Unreachable if code in (498, 499) else AuthFailed
+            raise cls("DSM login failed: "
                            + describe_error("SYNO.API.Auth", {"error": r.get("error"), "version": version})
                            + (f"\n{hint}" if hint else ""))
         self.account = account
@@ -588,7 +590,7 @@ class PasswordBackend:
         if self.session_kind == "env":
             raise NasError(f"the DSM session in NAS_SID was rejected (code {code}); paste a fresh one or unset NAS_SID")
         self._sid = self._token = None
-        self.login(save=True)
+        self.login(save=self.session_kind == "cache")
 
     def call_many(self, calls: list[dict]) -> list[dict]:
         if not self._sid:
@@ -617,7 +619,8 @@ class PasswordBackend:
                     break
                 last = {"ok": False, "error": r.get("error"), "version": v}
                 code = (r.get("error") or {}).get("code")
-                if code in self.RENEW_CODES and self.session_kind in ("cache", "env") and not renewed:
+                if code in self.RENEW_CODES and not renewed and (
+                        self.session_kind in ("cache", "env") or (self.renew and self.session_kind == "login")):
                     self._renew(code)
                     renewed = True
                     continue  # same version again with the new session
@@ -845,12 +848,13 @@ class LocalBackend:
 
 
 def open_session(name: str, chrome_origins: list[str] | None = None, lan_origins: list[str] | None = None,
-                 creds: Credentials | None = None) -> Session:
+                 creds: Credentials | None = None, renew: bool = False) -> Session:
     cfg = config.get()
     if name == "chrome":
         return Session(ChromeBackend(chrome_origins if chrome_origins is not None else cfg["chrome_origins"]))
     if name == "password":
-        return Session(PasswordBackend(lan_origins if lan_origins is not None else cfg["origins"], creds, cfg))
+        return Session(PasswordBackend(lan_origins if lan_origins is not None else cfg["origins"], creds, cfg,
+                                       renew=renew))
     if name == "local":
         return Session(LocalBackend())
     raise NasError(f"unknown backend {name!r}")

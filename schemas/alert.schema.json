@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:synology-nas-cli:schema:alert",
+  "title": "nas --json alert",
+  "type": "array",
+  "items": {
+    "$ref": "#/$defs/finding"
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "required": [
+        "level",
+        "code",
+        "kind",
+        "message"
+      ],
+      "properties": {
+        "level": {
+          "enum": [
+            "critical",
+            "warning",
+            "info"
+          ]
+        },
+        "code": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "condition",
+            "event"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "repeat": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

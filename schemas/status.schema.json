@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:synology-nas-cli:schema:status",
+  "title": "nas --json status",
+  "type": "object",
+  "required": [
+    "model",
+    "firmware_ver",
+    "uptime",
+    "sa_26_13",
+    "latest_for_model"
+  ],
+  "properties": {
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "firmware_ver": {
+      "type": "string"
+    },
+    "firmware_date": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "uptime": {
+      "type": "string"
+    },
+    "nas_time": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sys_temp_c": {
+      "type": [
+        "number",
+        "string",
+        "null"
+      ]
+    },
+    "ram_mb": {
+      "type": [
+        "number",
+        "string",
+        "null"
+      ]
+    },
+    "latest_for_model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sa_26_13": {
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "patched",
+            "vulnerable",
+            "no_fix_for_branch",
+            "unknown"
+          ]
+        },
+        "fixed_in": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

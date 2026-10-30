@@ -20,6 +20,7 @@ import urllib.request
 
 from . import config
 from .backends import NasError, describe_error
+from .errors import can_prompt
 
 DOWNLOAD_API = "https://www.synology.com/api/support/findDownloadInfo"
 SESSION_DATA = "/webapi/entry.cgi?api=SYNO.Core.Desktop.SessionData&version=1&method=getjs"
@@ -190,7 +191,7 @@ def upgrade(s, args):
         # PreCheck reported notes/warnings: show them and ask again instead of installing silently
         print("\n".join(lines[-(len(notes.splitlines()) + 2):]), file=sys.stderr)
         answer = ""
-        if sys.stdin.isatty():
+        if can_prompt():
             sys.stderr.write("PreCheck reported the notes above. Install now (the NAS reboots)? [y/N] ")
             sys.stderr.flush()
             answer = sys.stdin.readline().strip().lower()

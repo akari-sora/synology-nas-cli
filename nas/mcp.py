@@ -1,0 +1,254 @@
+"""`nas mcp`: a Model Context Protocol server over stdio.
+
+JSON-RPC 2.0, one message per line on stdin/stdout (stdout carries nothing else; diagnostics go to
+stderr). Each tool runs the matching `nas` command with the same arguments and returns the same JSON
+as `nas --json <command>` as text content; `_meta.exit_code` is the exit status the command would
+have. Prompts are off (`--no-input`): a missing credential is an error result, never a wait.
+`incident_fix` only returns the dry-run plan unless the call has `"confirm": true`.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import sys
+import traceback
+
+from . import __version__, alert, commands, incident, manage
+from .errors import NasError, set_no_input
+
+PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
+
+INSTRUCTIONS = (
+    "Tools wrap the `nas` CLI for one Synology NAS (DSM 7). Results are the JSON of `nas --json <command>`; "
+    "_meta.exit_code is the CLI exit status (0 ok, 1 findings/failure, 3 input required, 4 login failed, "
+    "5 AutoBlock, 6 unreachable, 7 certificate changed). incident_fix returns a plan unless confirm is true. "
+    "api_read accepts read methods only. Each failed login counts toward DSM's AutoBlock (10 in 5 minutes)."
+)
+
+READ = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
+WRITE = {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False}
+
+
+def _obj(props: dict | None = None, required: list | None = None) -> dict:
+    s = {"type": "object", "properties": props or {}, "additionalProperties": False}
+    if required:
+        s["required"] = required
+    return s
+
+
+_LIST = {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]}
+
+# name -> (description, input schema, annotations, argv builder)
+TOOLS = {
+    "whoami": ("Sign in and show backend, origin, credential source, account, admin flag and DSM version.",
+               _obj(), READ, lambda a: ["whoami"]),
+    "status": ("Model, DSM version, uptime and the SA-26:13 verdict.", _obj(), READ, lambda a: ["status"]),
+    "health": ("Disks (SMART, temperature), storage pools, volumes, UPS, CPU and memory.", _obj(), READ,
+               lambda a: ["health"]),
+    "net": ("Network interfaces, PPPoE (public address), firewall state, gateway.", _obj(), READ, lambda a: ["net"]),
+    "services": ("SSH, FTP, SMB, AFP, NFS, rsync, QuickConnect, AutoBlock and DSM ports.", _obj(), READ,
+                 lambda a: ["services"]),
+    "logs": ("Connection-log summary: failed sign-ins by user and address, successful sign-ins from outside "
+             "the LAN.",
+             _obj({"since": {"type": "string", "description": "YYYY-MM-DD or 'YYYY-MM-DD HH:MM' (NAS time)"},
+                   "limit": {"type": "integer", "minimum": 1, "description": "entries to read, newest first"},
+                   "top": {"type": "integer", "minimum": 1}}), READ,
+             lambda a: ["logs"] + _opt(a, "since") + _opt(a, "limit") + _opt(a, "top")),
+    "alert": ("One pass of the health and security checks (baseline not updated). Result: list of findings "
+              "{level, code, kind, message}; empty list = all clear.",
+              _obj({"window": {"type": "integer", "minimum": 1, "description": "minutes of connection log"},
+                    "failed_threshold": {"type": "integer", "minimum": 0}}), READ,
+              lambda a: ["alert", "--no-update"] + _opt(a, "window") + _opt(a, "failed_threshold")),
+    "incident_audit": ("Read-only audit against the C3RB3R/.L0CK3D ransomware campaign: PASS/WARN/FAIL/SKIP "
+                       "per item with a hint. probe opens TCP connections to the public address; scan runs a "
+                       "File Station search for ransom notes (minutes, creates temporary search tasks).",
+                       _obj({"probe": {"type": "boolean"}, "scan": {"type": "boolean"},
+                             "hours": {"type": "integer", "minimum": 1},
+                             "failed_threshold": {"type": "integer", "minimum": 0}}), READ,
+                       lambda a: ["incident"] + _flag(a, "probe") + _flag(a, "scan") + _opt(a, "hours")
+                       + _opt(a, "failed_threshold")),
+    "incident_fix": ("Hardening for the C3RB3R/.L0CK3D campaign. Without confirm: returns the plan (each change "
+                     "current -> new, the API calls, the DSM UI path) and sends no write. With confirm: true: "
+                     "applies it, reads every change back and audits again. Fix names: "
+                     + ", ".join(incident.FIX_ORDER) + ".",
+                     _obj({"confirm": {"type": "boolean", "description": "true applies the plan"},
+                           "only": dict(_LIST, description="fix names to include"),
+                           "skip": dict(_LIST, description="fix names to leave out"),
+                           "share": {"type": "array", "items": {"type": "string"}},
+                           "ransom_scan": {"type": "boolean", "description": "a clean scan allows snapshot fixes"},
+                           "i_know_snapshots_may_rotate": {"type": "boolean"},
+                           "upgrade": {"type": "boolean", "description": "install the newest DSM (reboots)"},
+                           "rotate_password": {"type": "boolean"}}), WRITE,
+                     lambda a: ["incident", "fix", "--yes" if a.get("confirm") else "--dry-run"]
+                     + _csv(a, "only") + _csv(a, "skip") + [x for s in a.get("share") or [] for x in ("--share", s)]
+                     + _flag(a, "ransom_scan") + _flag(a, "i_know_snapshots_may_rotate") + _flag(a, "upgrade")
+                     + _flag(a, "rotate_password")),
+    "pkg_list": ("Installed packages: version, status, volume, whether they can be stopped.", _obj(), READ,
+                 lambda a: ["pkg", "list"]),
+    "volume_list": ("Volumes: status, file system, atime, capacity warning.", _obj(), READ,
+                    lambda a: ["volume", "list"]),
+    "tailscale_status": ("Tailscale package status, tailnet addresses and key expiry.", _obj(), READ,
+                         lambda a: ["tailscale", "status"]),
+    "api_read": ("Call any DSM Web API read method (get/list/load/info/query/status...). Write methods are refused.",
+                 _obj({"api": {"type": "string", "description": "e.g. SYNO.Core.System"},
+                       "method": {"type": "string", "description": "e.g. info"},
+                       "params": {"type": "object", "description": "parameters; non-JSON strings are quoted"},
+                       "version": {"type": "integer", "minimum": 1}}, ["api", "method"]), READ,
+                 lambda a: ["api", a["api"], a["method"]] + _opt(a, "version")
+                 + [f"{k}={v if isinstance(v, str) else json.dumps(v)}" for k, v in (a.get("params") or {}).items()]),
+}
+
+
+def _opt(a: dict, key: str) -> list:
+    return [f"--{key.replace('_', '-')}", str(a[key])] if a.get(key) is not None else []
+
+
+def _flag(a: dict, key: str) -> list:
+    return [f"--{key.replace('_', '-')}"] if a.get(key) else []
+
+
+def _csv(a: dict, key: str) -> list:
+    v = a.get(key)
+    if not v:
+        return []
+    return [f"--{key}", v if isinstance(v, str) else ",".join(v)]
+
+
+def tool_list() -> list:
+    return [{"name": n, "title": n.replace("_", " "), "description": d, "inputSchema": s, "annotations": ann}
+            for n, (d, s, ann, _) in TOOLS.items()]
+
+
+def _check_args(schema: dict, args) -> str | None:
+    if not isinstance(args, dict):
+        return "arguments must be an object"
+    props = schema.get("properties", {})
+    for k in schema.get("required", []):
+        if k not in args:
+            return f"missing argument {k!r}"
+    for k, v in args.items():
+        if k not in props:
+            return f"unknown argument {k!r}"
+        types = [o["type"] for o in props[k]["oneOf"]] if "oneOf" in props[k] else [props[k].get("type")]
+        ok = {"string": isinstance(v, str), "boolean": isinstance(v, bool), "object": isinstance(v, dict),
+              "integer": isinstance(v, int) and not isinstance(v, bool),
+              "array": isinstance(v, list) and all(isinstance(x, str) for x in v)}
+        if not any(ok.get(t) for t in types):
+            return f"argument {k!r} must be {' or '.join(types)}"
+    return None
+
+
+class Server:
+    def __init__(self, session_factory):
+        self.session_factory = session_factory
+        self.session = None
+
+    def _session(self):
+        if self.session is None:
+            self.session = self.session_factory()
+        return self.session
+
+    def close(self) -> None:
+        if self.session is not None:
+            try:
+                self.session.close()
+            except NasError:
+                pass
+            self.session = None
+
+    def call_tool(self, name: str, args: dict) -> dict:
+        from .cli import COMMANDS, parse_args
+        argv = TOOLS[name][3](args)
+        try:
+            ns = parse_args(argv)
+        except SystemExit:
+            return self._error(f"invalid arguments for {name}", 2)
+        if name == "api_read" and not commands.is_read_method(args["method"]):
+            return self._error(f"{args['method']!r} is not a read method; api_read only reads", 1)
+        fn = COMMANDS[ns.cmd][0]
+        try:
+            with contextlib.redirect_stdout(sys.stderr):  # stdout belongs to the protocol
+                result = fn(self._session(), ns)
+        except NasError as e:
+            if e.exit_code in (4, 5, 6, 7):
+                self.close()
+            return self._error(str(e), e.exit_code)
+        data, rc = result[1], (result[2] if len(result) > 2 else 0)
+        text = json.dumps(data, ensure_ascii=False, indent=2, default=str)
+        return {"content": [{"type": "text", "text": text}], "isError": False, "_meta": {"exit_code": rc}}
+
+    @staticmethod
+    def _error(msg: str, code: int) -> dict:
+        return {"content": [{"type": "text", "text": msg}], "isError": True, "_meta": {"exit_code": code}}
+
+    def handle(self, msg) -> dict | None:
+        if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0" or "method" not in msg:
+            return _rpc_error(msg.get("id") if isinstance(msg, dict) else None, -32600, "invalid request")
+        mid, method, params = msg.get("id"), msg["method"], msg.get("params") or {}
+        if "id" not in msg:  # notification
+            return None
+        if method == "initialize":
+            want = params.get("protocolVersion")
+            return _rpc_result(mid, {
+                "protocolVersion": want if want in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
+                "capabilities": {"tools": {"listChanged": False}},
+                "serverInfo": {"name": "synology-nas-cli", "title": "Synology NAS (nas CLI)", "version": __version__},
+                "instructions": INSTRUCTIONS})
+        if method == "ping":
+            return _rpc_result(mid, {})
+        if method == "tools/list":
+            return _rpc_result(mid, {"tools": tool_list()})
+        if method == "tools/call":
+            name, args = params.get("name"), params.get("arguments") or {}
+            if name not in TOOLS:
+                return _rpc_error(mid, -32602, f"unknown tool {name!r}")
+            bad = _check_args(TOOLS[name][1], args)
+            if bad:
+                return _rpc_error(mid, -32602, bad)
+            try:
+                return _rpc_result(mid, self.call_tool(name, args))
+            except Exception as e:  # a bug must not kill the server
+                traceback.print_exc(file=sys.stderr)
+                return _rpc_result(mid, self._error(f"internal error: {type(e).__name__}: {e}", 1))
+        return _rpc_error(mid, -32601, f"method not found: {method}")
+
+
+def _rpc_result(mid, result: dict) -> dict:
+    return {"jsonrpc": "2.0", "id": mid, "result": result}
+
+
+def _rpc_error(mid, code: int, message: str) -> dict:
+    return {"jsonrpc": "2.0", "id": mid, "error": {"code": code, "message": message}}
+
+
+def serve(infile, outfile, session_factory) -> int:
+    """Answer requests from `infile` until EOF."""
+    set_no_input(True)
+    server = Server(session_factory)
+
+    def send(m):
+        outfile.write(json.dumps(m, ensure_ascii=False) + "\n")
+        outfile.flush()
+
+    try:
+        while True:
+            line = infile.readline()
+            if not line:
+                break
+            if not line.strip():
+                continue
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                send(_rpc_error(None, -32700, "parse error"))
+                continue
+            if isinstance(msg, list):
+                send(_rpc_error(None, -32600, "batches are not supported"))
+                continue
+            reply = server.handle(msg)
+            if reply is not None:
+                send(reply)
+    finally:
+        server.close()
+    return 0

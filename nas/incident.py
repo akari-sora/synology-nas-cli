@@ -32,6 +32,7 @@ import urllib.request
 from . import advisories, config
 from .alert import _allowed, allowed_networks
 from .backends import NasError, PasswordBackend, describe_error
+from .errors import InputRequired, can_prompt
 from .commands import (PORTS, _ip_of, fetch_connection_log, is_read_method, list_shares, need, part,
                        probe_ports, public_addresses, ransom_scan, snapshot_state)
 from .commands import _LOG_FROM, _LOG_USER, _LOG_VIA
@@ -1180,7 +1181,7 @@ def _plan_lines(changes) -> list:
 
 
 def _confirm(n: int) -> bool:
-    if not sys.stdin.isatty():
+    if not can_prompt():
         return False
     sys.stderr.write(f"Apply {n} change(s) to the NAS? [y/N] ")
     sys.stderr.flush()
@@ -1201,8 +1202,9 @@ def fix(s, args):
             lines.append("Dry run: nothing was sent.")
         return lines, data, (1 if any(c["refused"] for c in changes) and not args.dry_run else 0)
     if not args.yes and not _confirm(len(runnable)):
-        lines.append("Not applied (answer y, or pass --yes).")
-        return lines, data, 1
+        lines.append("Not applied: confirm on a terminal or pass --yes (input is off: --no-input, NAS_NO_INPUT=1 or "
+                     "no terminal)." if not can_prompt() else "Not applied (answer y, or pass --yes).")
+        return lines, data, (InputRequired.exit_code if not can_prompt() else 1)
 
     results, failed = [], False
     for c in runnable:
