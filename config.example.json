@@ -1,0 +1,28 @@
+{
+  "_comment": "synology-nas-cli configuration. Every key is optional; see README.md#configuration. Addresses below are documentation examples (RFC 5737), replace them.",
+  "name": "my-nas",
+  "origins": [
+    "https://192.0.2.10:5001",
+    "https://my-nas.example-tailnet.ts.net:5001"
+  ],
+  "lan_ip": "192.0.2.10",
+  "public_ip": "",
+  "allowed_networks": [],
+  "snapshot_shares": [
+    "photos",
+    "documents"
+  ],
+  "latest_dsm": "",
+  "credentials": {
+    "op_username": "op://VAULT/ITEM/username",
+    "op_password": "op://VAULT/ITEM/password",
+    "password_command": "",
+    "otp_command": ""
+  },
+  "webhook": {
+    "file": "~/.config/synology-nas-cli/webhook.json"
+  },
+  "deploy": {
+    "stage_dir": "/SHARE/.nas-cli-deploy"
+  }
+}

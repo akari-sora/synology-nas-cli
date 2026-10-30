@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+.omc/
+# local configs, sessions and webhook files never belong in the repo
+config.json
+*.local.json
+session.json
+device-token.json
+webhook.json

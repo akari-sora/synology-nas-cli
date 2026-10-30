@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synology-nas-cli"
+version = "1.0.0"
+description = "CLI for a Synology NAS (DSM 7): status, health, alerts, and a one-command audit and fix for the C3RB3R/.L0CK3D ransomware campaign"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Akari Sora"}]
+requires-python = ">=3.8"
+dependencies = []
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Environment :: Console",
+    "Topic :: System :: Systems Administration",
+]
+
+[project.scripts]
+nas = "nas.cli:main"
+
+[tool.setuptools]
+packages = ["nas"]
