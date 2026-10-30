@@ -169,6 +169,7 @@ def changing_run(s, code, cfg, *a, **kw):
         t = open(p).read().split(" ")
         t[21] = "777"
         open(p, "w").write(" ".join(t))
+        os.rename(R + "/proc/808/stat", R + "/proc/808/stat.gone")  # PID 808 exits before the freeze
     return out
 
 
@@ -177,7 +178,10 @@ contain.run_root_python = changing_run
 contain.run_root_python = real_run
 fr = {f["pid"]: f for f in data["frozen"]}
 assert calls == ["scan", "freeze"] and "PID reused" in fr[404]["skipped"] and "404 SIGSTOP" not in signals()
+assert fr[808]["gone"] and not fr[808]["ok"] and "808 SIGSTOP" not in signals() and rc == 1
+assert "pid 808: exited before it could be frozen" in "\n".join(lines)
 assert "202 SIGSTOP" in signals()
+os.rename(R + "/proc/808/stat.gone", R + "/proc/808/stat")
 t = open(R + "/proc/404/stat").read().split(" ")
 t[21] = "0"
 open(R + "/proc/404/stat", "w").write(" ".join(t))
