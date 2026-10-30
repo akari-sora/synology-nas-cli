@@ -191,6 +191,14 @@ def _networks(xs) -> list:
         return sorted(xs)
 
 
+def _is_public(n: str) -> bool:
+    import ipaddress
+    try:
+        return ipaddress.ip_network(n, strict=False).is_global
+    except ValueError:
+        return False  # invalid entries are reported by nas setup
+
+
 def _current(cfg: dict, lan: list | None = None) -> dict:
     """Setup field -> value in a config dict (the file, or the effective config); None = not set."""
     cred, tls = cfg.get("credentials") or {}, cfg.get("tls") or {}
@@ -235,8 +243,11 @@ def setup_changes(a: dict, lan: list | None = None) -> list:
         want["stage_dir"] = a["stage_dir"].rstrip("/")
     if a.get("webhook_file"):
         want["webhook_file"] = os.path.expanduser(a["webhook_file"])
+    # a value in effect only because it is the built-in default (tls pin, otp from op) is not set yet
+    default = _current(config.DEFAULTS)
+    effective = {k: (None if v == default.get(k) else v) for k, v in _current(config.get(), lan).items()}
     out = []
-    for cur in (_current(config.get(), lan), _current(_load_file(config.config_path()[0]))):
+    for cur in (effective, _current(_load_file(config.config_path()[0]))):
         out += [k for k, v in want.items() if cur.get(k) is not None and cur[k] != v and k not in out]
     return out
 
@@ -270,6 +281,11 @@ class Server:
                     flag = "--" + k.replace("_", "-")
                     return self._error(f"{k} command:... runs a local command; it is set with `nas setup {flag} "
                                        "command:...` on the command line. Through MCP: op:..., keychain or env.", 2)
+            public = [n for n in (args.get("allowed_network") or []) if _is_public(n)]
+            if public:
+                return self._error("allowed_network " + ", ".join(public) + " is a public range; public addresses "
+                                   "are added with `nas setup --allowed-network CIDR` on the command line. "
+                                   "Through MCP: LAN, VPN and other private ranges.", 2)
             changed = setup_changes(args, self.lan_origins)
             if changed:
                 return self._error("setup through MCP fills fields the configuration does not have yet; "

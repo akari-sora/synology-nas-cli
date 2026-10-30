@@ -217,13 +217,24 @@ saved = (list(eff["origins"]), dict(eff["deploy"]), dict(eff["webhook"]), dict(e
 eff["origins"] = ["https://192.0.2.20:5001"]
 eff["deploy"]["stage_dir"] = "/files/.nas-cli-deploy"
 eff["webhook"]["file"] = "~/webhook.json"
+# built-in defaults (tls pin, otp from op) are not "set": a first MCP setup may choose verify / none
+for arg, val in (("tls", "verify"), ("otp_source", "none")):
+    r = mcp.Server(factory).call_tool("setup", {arg: val})
+    assert not r["isError"] and r["_meta"]["exit_code"] == 3, (arg, r)
+# public allowed networks are a command-line option; private ones are filled through MCP
+r = mcp.Server(factory).call_tool("setup", {"allowed_network": ["192.168.7.0/24", "46.8.78.0/24"]})
+assert r["isError"] and r["_meta"]["exit_code"] == 2 and "46.8.78.0/24" in r["content"][0]["text"], r
+assert "192.168.7.0/24" not in r["content"][0]["text"] and "nas setup --allowed-network" in r["content"][0]["text"], r
+r = mcp.Server(factory).call_tool("setup", {"allowed_network": ["192.168.7.0/24", "100.64.0.0/10"]})
+assert not r["isError"] and r["_meta"]["exit_code"] == 3, r
+eff["tls"]["verify"] = True
 for arg, val in (("origin", "https://192.0.2.21:5001"), ("stage_dir", "/other/.stage"),
-                 ("webhook_file", "/tmp/other.json"), ("tls", "verify"), ("otp_source", "none")):
+                 ("webhook_file", "/tmp/other.json"), ("tls", "pin")):
     r = mcp.Server(factory).call_tool("setup", {arg: val})
     assert r["isError"] and r["_meta"]["exit_code"] == 2 and arg in r["content"][0]["text"], (arg, r)
     assert SETUP_FLAG_TEXT[arg] in r["content"][0]["text"], r
 same = mcp.Server(factory).call_tool("setup", {"origin": "https://192.0.2.20:5001/", "stage_dir": "/files/.nas-cli-deploy/",
-                                               "webhook_file": os.path.expanduser("~/webhook.json"), "tls": "pin"})
+                                               "webhook_file": os.path.expanduser("~/webhook.json"), "tls": "verify"})
 assert not same["isError"] and same["_meta"]["exit_code"] == 3, same  # same values pass; missing fields asked for
 eff["origins"] = []
 r = mcp.Server(factory, lan_origins=["https://192.0.2.30:5001"]).call_tool("setup", {"origin": "https://192.0.2.31:5001"})
