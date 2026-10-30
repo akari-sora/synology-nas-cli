@@ -7,6 +7,15 @@ description: Operate a Synology NAS (DSM 7) from the command line with the `nas`
 
 `nas` is a Python CLI (stdlib only, Python 3.8+) for the DSM 7 Web API. Run it as `nas` (installed with `pip install -e .` or linked onto PATH) or as `bin/nas` from the repository. Every command accepts `--json` (put it before the command: `nas --json status`).
 
+## First run
+
+```bash
+nas setup --origin https://NAS:5001 --user USER --password-source op:op://VAULT/ITEM/password --json
+nas doctor --json
+```
+
+`setup` exits 3 with `{"missing": [{"field", "why", "ask_user"}]}` when a value is needed from a person (relay `ask_user`, then call `setup` again with the answer); `doctor` returns `{"checks": [{"name", "status", "detail", "next_step"}]}`. Full sequence: `docs/AGENT-RUNBOOK.md`.
+
 ## Configuration
 
 - Config file: `$NAS_CONFIG`, else `~/.config/synology-nas-cli/config.json`. `nas config init` writes an example; `nas config show` prints the effective config (commands masked) and which credential source is active.
@@ -48,7 +57,7 @@ Sessions: by default each command signs in and out. `nas login` caches the sessi
 | Volume atime | `nas volume list`, `nas volume atime volume_1 noatime` |
 | Tailscale package | `nas tailscale status`, `nas tailscale login-url [--force]` |
 | DSM update | `nas upgrade --dry-run`, `nas upgrade` (PreCheck only), `nas upgrade --yes` (installs, reboots) |
-| Any API | `nas api SYNO.Core.System info --version 1`; methods that are not reads need `--allow-write` |
+| Any API | `nas api SYNO.Core.System info --version 1`; write methods with `--allow-write` (or `--yes` / `NAS_YES=1`) |
 
 Find API names and versions: `nas api SYNO.API.Info query --version 1 query=all` (or `query=SYNO.Core.Foo`). Parameters are `k=v`; values that are not valid JSON are sent as JSON strings automatically.
 
@@ -66,9 +75,9 @@ Find API names and versions: `nas api SYNO.API.Info query --version 1 query=all`
 | 102 / 103 / 104 | API / method / version not available; check `SYNO.API.Info` |
 | 114 / 120 | missing / invalid parameter; often JSON encoding |
 
-## Technical cautions
+## Technical facts
 
-- AutoBlock (DSM default): 10 failed sign-ins within 5 minutes block the source address, often permanently (`expire_day 0`). The CLI does not retry a failed password; each rerun with the same wrong password adds a failure. Unblocking: Control Panel > Security > Protection > Allow/Block List from another address. Tailscale's DSM package in userspace mode makes every tailnet device appear as `127.0.0.1`, so a block on `127.0.0.1` locks out the whole tailnet.
+- AutoBlock (DSM default): 10 failed sign-ins within 5 minutes block the source address, often permanently (`expire_day 0`). The CLI reports a failed sign-in once and stops; each rerun with the same wrong password adds a failure. Unblocking: Control Panel > Security > Protection > Allow/Block List from another address. Tailscale's DSM package in userspace mode makes every tailnet device appear as `127.0.0.1`, so a block on `127.0.0.1` locks out the whole tailnet.
 - DSM 7 APIs with `requestFormat: JSON` JSON-decode every field. A bare string can be accepted, rejected (120), or silently ignored (`SYNO.Core.Package.Uninstallation` answers success and does nothing). Fields that take "a string containing JSON" need double encoding.
 - The SynoToken is accepted only as a URL query parameter.
 - `synowebapi` prints a `[Line N] Exec WebAPI:` banner before its JSON.

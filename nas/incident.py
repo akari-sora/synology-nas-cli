@@ -692,19 +692,27 @@ def _fw_rule(net) -> dict:
             "source_ip": f"{net.network_address}/{net.netmask}", "source_ip_group": "netmask"}
 
 
-def plan_firewall(s, f) -> dict | None:
+def plan_firewall(s, f, override: bool = False) -> dict | None:
     fw, _ = f["fw"]
     prof, e_prof = f["fw_profile"]
     if fw is None or prof is None:
         return _change("firewall", "firewall", "unreadable", "-", [], refused=f"cannot read the firewall profile ({e_prof})")
     name = fw.get("profile_name") or "default"
     seen, why = lockout_guard(s, f)
-    if why:
-        return _change("firewall", "firewall", "-", "-", [], refused=why)
+    if why and not override:
+        return _change("firewall", "firewall", "-", "-", [], refused=f"{why} (override: --force-firewall)")
+    if why:  # overridden: still allow what DSM logged for this session when it is an address
+        acct = current_account(s) if s.backend_name != "local" else None
+        logged = dsm_seen_address(f, acct)
+        try:
+            seen = logged if logged and not ipaddress.ip_address(logged).is_loopback and \
+                ipaddress.ip_address(logged).version == 4 else None
+        except ValueError:
+            seen = None
     v4, v6, added = firewall_allow_list(seen)
-    if not v4:
+    if not v4 and not override:
         return _change("firewall", "firewall", "-", "-", [], refused=(
-            "nothing to allow: allowed_networks is empty and --backend local has no client address"))
+            "nothing to allow: allowed_networks is empty and there is no client address (override: --force-firewall)"))
     want = [_fw_rule(n) for n in v4]
     key = lambda r: (r.get("source_ip"), r.get("ports"), r.get("protocol"), r.get("policy"))  # noqa: E731
     adapters = _adapters(f)
@@ -733,9 +741,14 @@ def plan_firewall(s, f) -> dict | None:
     before = ("off" if not fw.get("enable_firewall") else "on") + (
         f"; unmatched traffic allowed on {', '.join(open_ad)}" if open_ad else "") + (
         f"; missing allow rules: {', '.join(adds)}" if adds else "")
-    after = (f"on (profile {name}): allow {', '.join(str(n) for n in v4)} on {', '.join(targets)}; drop everything "
+    after = (f"on (profile {name}): allow {', '.join(str(n) for n in v4) or 'nothing'} on {', '.join(targets)}; drop everything "
              f"else on {', '.join(a for a in new if a not in ('name', 'global'))}")
     notes = []
+    if why:
+        notes.append(f"lockout check: {why}; applied because of --force-firewall")
+    if not v4:
+        notes.append("no allow rules: only connections DSM sees as loopback (e.g. Tailscale userspace mode) and the "
+                     "NAS's own console reach DSM afterwards")
     if added:
         notes.append(f"{added} added: the address DSM logged for this session")
     if not config.get()["allowed_networks"]:
@@ -818,11 +831,12 @@ def plan(s, f, args) -> list:
     snap = f["snap"]
     sc = (f.get("scan") or (None, None))[0]
     scan_clean = bool(sc and sc.get("finished") and not (sc.get("root_hits") or sc.get("search_hits")))
-    rotate_ok = scan_clean or getattr(args, "i_know_snapshots_may_rotate", False)
+    force = bool(getattr(args, "force", False))
+    rotate_ok = scan_clean or getattr(args, "i_know_snapshots_may_rotate", False) or force
     rotate_why = (None if rotate_ok else
-                  "snapshots that start being taken again apply their retention policy, which deletes older snapshots "
-                  "you may need to recover encrypted files. Run with --ransom-scan (it must come back clean) or pass "
-                  "--i-know-snapshots-may-rotate")
+                  "snapshots that start being taken again apply their retention policy, which deletes the oldest "
+                  "snapshots; a clean --ransom-scan in the same run shows none of them are needed for recovery "
+                  "(override: --i-know-snapshots-may-rotate or --force)")
     # snapshot_worm: lock off where the model lacks immutable snapshots
     if snap and snap["worm_supported"] is False:
         for share in f["shares"]:
@@ -1023,16 +1037,23 @@ def plan(s, f, args) -> list:
         enabled = {u.get("name") for u in (us or {}).get("users", []) if u.get("expired") != "now"}
         others = sorted((names or set()) & enabled - {"admin"})
         refused = None
-        if not me:
-            refused = "cannot tell which account this session uses (SYNO.Core.Desktop.Initdata)"
+        force_admin = force or getattr(args, "force_admin", False)
+        if s.backend_name not in ("password", "local"):
+            refused = "runs through a root task: use --backend password or --backend local"
+        elif not me:
+            refused = "the account of this session is unknown (SYNO.Core.Desktop.Initdata)"
         elif me == "admin":
-            refused = "this CLI is signed in as admin; sign in with another administrator first"
+            refused = "this CLI is signed in as admin itself"
         elif names is None:
-            refused = f"cannot list the administrators group ({e_adm}); disabling admin could leave no administrator"
+            refused = f"the administrators group could not be read ({e_adm})"
         elif not others:
-            refused = "no other enabled administrator exists; create one first"
-        elif s.backend_name not in ("password", "local"):
-            refused = "needs --backend password (a root task) or --backend local"
+            refused = "admin is the only enabled administrator"
+        admin_note = ""
+        if refused and force_admin and s.backend_name in ("password", "local"):
+            admin_note = f"check: {refused}; applied because of --force-admin. "
+            refused = None
+        elif refused and s.backend_name in ("password", "local"):
+            refused += " (override: --force-admin)"
         user_set = call("SYNO.Core.User", "set", 1, {"name": "admin", "expired": "now"})
         script = ("/usr/syno/bin/synowebapi --exec api=SYNO.Core.User method=set version=1 "
                   "name='\"admin\"' expired='\"now\"'")
@@ -1063,10 +1084,10 @@ def plan(s, f, args) -> list:
             call("SYNO.Core.TaskScheduler", "delete", 2, {"tasks": [{"id": "<task id>", "real_owner": "root"}]})])
         out.append(_change("admin_account", "admin", f"enabled (expired={admin.get('expired')})", "disabled", calls,
                            apply=apply, verify=verify, refused=refused,
-                           note="SYNO.Core.User set answers 105 from a password session; it runs as root in a "
-                                "temporary Task Scheduler task (deleted afterwards)"))
+                           note=admin_note + "SYNO.Core.User set answers 105 from a password session; it runs as root "
+                                "in a temporary Task Scheduler task (deleted afterwards)"))
 
-    fwc = plan_firewall(s, f)
+    fwc = plan_firewall(s, f, override=force or getattr(args, "force_firewall", False))
     if fwc:
         out.append(fwc)
 
@@ -1178,16 +1199,18 @@ def plan_rotation(s) -> dict:
 
 def plan_upgrade(s, f, args) -> dict:
     it = next((x for x in evaluate(f, args) if x["id"] == "dsm_version"), None)
-    if it and it["status"] == PASS:
-        return _change("upgrade", "DSM", it["detail"], "-", [], refused="already patched; nothing to upgrade")
+    if it and it["status"] == PASS and not getattr(args, "force", False):
+        return _change("upgrade", "DSM", it["detail"], "-", [], refused="already patched (override: --force)")
     if s.backend_name != "password":
         return _change("upgrade", "DSM", "-", "-", [], refused="--upgrade needs --backend password (uploads the .pat)")
     from . import upgrade as up
 
     def apply(s_):
-        ns = types.SimpleNamespace(pat=None, dry_run=False, yes=True, force=False, wait_only=False,
+        ns = types.SimpleNamespace(pat=None, dry_run=False, yes=True, force=bool(getattr(args, "force", False)),
+                                   wait_only=False,
                                    download_dir=config.path(config.get()["upgrade"]["cache_dir"]),
-                                   lang=config.get()["upgrade"]["lang"], timeout=3600, ask_on_notes=True)
+                                   lang=config.get()["upgrade"]["lang"], timeout=3600,
+                                   ask_on_notes=not getattr(args, "assume_yes", False))
         lines, data = up.upgrade(s_, ns)
         for line in lines:
             print("  " + line, file=sys.stderr)
@@ -1249,9 +1272,11 @@ def fix(s, args):
             lines.append("Dry run: nothing was sent.")
         return lines, data, (1 if any(c["refused"] for c in changes) and not args.dry_run else 0)
     if not args.yes and not _confirm(len(runnable)):
-        lines.append("Not applied: confirm on a terminal or pass --yes (input is off: --no-input, NAS_NO_INPUT=1 or "
-                     "no terminal)." if not can_prompt() else "Not applied (answer y, or pass --yes).")
-        return lines, data, (InputRequired.exit_code if not can_prompt() else 1)
+        if not can_prompt():
+            lines.append("Not applied: add --yes (or NAS_YES=1).")
+            return lines, data, InputRequired.exit_code
+        lines.append("Not applied.")
+        return lines, data, 1
 
     results, failed = [], False
     for c in runnable:

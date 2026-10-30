@@ -16,11 +16,11 @@ Not affiliated with Synology Inc. "Synology", "DSM" and "QuickConnect" are trade
 - [`nas incident fix`](#nas-incident-fix)
 - [Other commands](#other-commands)
 - [Alerts and webhooks](#alerts-and-webhooks)
-- [Safety notes](#safety-notes)
+- [What changes the NAS](#what-changes-the-nas)
 - [Tests](#tests)
 - [繁體中文說明](#繁體中文說明)
 
-For AI agents: [`docs/MCP.md`](docs/MCP.md) (`nas mcp`), [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md), [`schemas/`](schemas/) (JSON Schemas of `--json` output), [`llms.txt`](llms.txt), `skills/install.sh` / `skills/install.ps1` (install the skills into `~/.claude/skills`, `~/.cursor/skills`, `~/.codex/skills`, `~/.agents/skills`, `~/.grok/skills`, `~/.gemini/skills`, `~/.config/opencode/skills`, `~/.hermes/shared-skills` where present; `--copy`, `--dry-run`, `--uninstall`).
+For AI agents: [`docs/AGENT-RUNBOOK.md`](docs/AGENT-RUNBOOK.md) (the step-by-step sequence), [`docs/MCP.md`](docs/MCP.md) (`nas mcp`), [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md), [`schemas/`](schemas/) (JSON Schemas of `--json` output), [`llms.txt`](llms.txt), `skills/install.sh` / `skills/install.ps1` (install the skills into `~/.claude/skills`, `~/.cursor/skills`, `~/.codex/skills`, `~/.agents/skills`, `~/.grok/skills`, `~/.gemini/skills`, `~/.config/opencode/skills`, `~/.hermes/shared-skills` where present; `--copy`, `--dry-run`, `--uninstall`).
 
 Further reading: [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md) (the campaign and a response checklist), [`docs/ALERTS.md`](docs/ALERTS.md) (alert codes, webhook body, deployment paths), [`docs/DSM-API-NOTES.md`](docs/DSM-API-NOTES.md) (DSM Web API behaviour this tool relies on), and the agent skills in [`skills/`](skills/).
 
@@ -81,9 +81,9 @@ nas whoami                           # one login: account, admin flag, DSM versi
 | macOS with 1Password | `password` | `op://VAULT/ITEM/password` refs; `op` signed in through the 1Password app | Approve `op` in the app the first time. 2FA codes from the same item (`op item get --otp`). |
 | macOS without 1Password | `password` | `nas login --save` (Keychain), or `password_command` = `security find-generic-password -s synology-nas -a USER -w` | `nas login` also caches the session so later commands do not sign in again. |
 | Linux server, cron, systemd timer | `password` | 1Password service account (`OP_SERVICE_ACCOUNT_TOKEN` or the token file) + `op://` refs, or `password_command` (`secret-tool lookup ...`, `pass show ...`) | No terminal: the prompt is off, so configure a non-interactive source. |
-| Windows | `password` | `password_command` with PowerShell (see [Credentials](#credentials)), or `NAS_USER` + `NAS_PASSWORD` | `cmdkey` can store a credential but cannot print it back; use the CredentialManager PowerShell module. The keychain store is not available on Windows. |
+| Windows | `password` | `password_command` with PowerShell (see [Credentials](#credentials)), or `NAS_USER` + `NAS_PASSWORD` | Store the credential with the CredentialManager PowerShell module (`New-StoredCredential`) and read it with `Get-StoredCredential` in `password_command`. |
 | On the NAS itself | `local` | none: runs as root through DSM Task Scheduler | `nas alert-deploy` sets this up. Uses DSM's own Python 3.8. |
-| CI / headless with a service account | `password` | `OP_SERVICE_ACCOUNT_TOKEN` (CI secret) + `op://` refs | Or `NAS_PASSWORD_COMMAND` reading the CI secret store. `NAS_PASSWORD` works but is the least safe. |
+| CI / headless with a service account | `password` | `OP_SERVICE_ACCOUNT_TOKEN` (CI secret) + `op://` refs | Or `NAS_PASSWORD_COMMAND` reading the CI secret store. `NAS_PASSWORD` also works. |
 
 ## Configuration
 
@@ -109,6 +109,7 @@ Example ([`config.example.json`](config.example.json), what `nas config init` wr
 | Key | Default | Meaning |
 |---|---|---|
 | `name` | `nas` | Label in webhook bodies and the DSM notification prefix (`[name]`). |
+| `assume_yes` | `false` | Accept every confirmation (same as `--yes` / `NAS_YES=1`). |
 | `origins` | `[]` | DSM URLs for `--backend password`, tried in order; the first that accepts a TCP connection (3 s) is used. Put the LAN address first, then a VPN/Tailscale one. |
 | `chrome_origins` | = `origins` | Which Chrome tab `--backend chrome` may use. |
 | `connect_timeout` | `3.0` | Seconds for the TCP reachability check. |
@@ -131,7 +132,7 @@ Example ([`config.example.json`](config.example.json), what `nas config init` wr
 | `upgrade.lang`, `upgrade.cache_dir` | `enu`, `~/.cache/synology-nas-cli/pat` | PreCheck note language; where `.pat` files are kept. |
 | `incident.*` | `14`, `3`, `30`, `10`, `5`, `false` | `snapshot_retain_days` (only set on shares that have no retention policy), `snapshot_hour`, `snapshot_minute` for schedules `incident fix` creates; `autoblock_attempts`, `autoblock_within_mins` it sets; `ioc_ips` (default `46.8.78.122`, `104.253.175.125`), `ioc_strings` (extra strings) for `exploit_attempts` and `--deep`; `allowed_users` (accounts `--deep` treats as known); `autoblock_allow_loopback`: also allow-list `127.0.0.1` in AutoBlock (Tailscale's DSM package in userspace mode delivers every tailnet connection as `127.0.0.1`, so one blocked tailnet device would block all of them). |
 
-Environment variables: `NAS_CONFIG`, `NAS_BACKEND`, `NAS_ORIGINS` (comma-separated; older name `NAS_LAN_ORIGIN`), `NAS_CHROME_ORIGINS` (older `NAS_ORIGIN`), `NAS_OP_ITEM` (`op://VAULT/ITEM`), `NAS_OP_TOKEN_FILE`, `NAS_USER`, `NAS_PASSWORD_COMMAND`, `NAS_PASSWORD`, `NAS_OTP_COMMAND`, `NAS_CREDENTIAL_SOURCE`, `NAS_SESSION_FILE`, `NAS_SID` + `NAS_SYNOTOKEN`, `OP_SERVICE_ACCOUNT_TOKEN`.
+Environment variables: `NAS_CONFIG`, `NAS_BACKEND`, `NAS_YES`, `NAS_NO_INPUT`, `NAS_ORIGINS` (comma-separated; older name `NAS_LAN_ORIGIN`), `NAS_CHROME_ORIGINS` (older `NAS_ORIGIN`), `NAS_OP_ITEM` (`op://VAULT/ITEM`), `NAS_OP_TOKEN_FILE`, `NAS_USER`, `NAS_PASSWORD_COMMAND`, `NAS_PASSWORD`, `NAS_OTP_COMMAND`, `NAS_CREDENTIAL_SOURCE`, `NAS_SESSION_FILE`, `NAS_SID` + `NAS_SYNOTOKEN`, `OP_SERVICE_ACCOUNT_TOKEN`.
 
 ## Credentials
 
@@ -145,7 +146,7 @@ The password comes from the first configured source in this chain (`credentials.
    - Bitwarden CLI: `bw get password synology-nas` (needs `BW_SESSION` from `bw unlock`)
    - Windows: `powershell -NoProfile -Command "(Get-StoredCredential -Target synology-nas).GetNetworkCredential().Password"` with the CredentialManager module (`Install-Module CredentialManager`). `cmdkey /generic:synology-nas /user:USER /pass` stores a credential but has no way to print the password again.
 3. **OS keychain** (`keychain`): the entry `nas login --save` wrote. macOS Keychain through `security` (the password goes through `security -i` on stdin, not the command line) or the Linux Secret Service through `secret-tool` (password on stdin). `credentials.store` = `auto` (default), `keychain`, `secret-tool`, or `""` (off); service name `credentials.store_service`. `nas logout --forget` deletes it.
-4. **Environment** (`env`): `NAS_USER` + `NAS_PASSWORD`. The least safe option: any process that can read the environment (and `ps e` on some systems) sees it.
+4. **Environment** (`env`): `NAS_USER` + `NAS_PASSWORD`. The value sits in the process environment (readable by processes of the same user, and by `ps e` on some systems).
 5. **Prompt** (`prompt`): `getpass`, only when stdin is a terminal and nothing above is configured.
 
 The username comes from `NAS_USER` / `credentials.username`, else `op_username`, else the keychain entry's account, else a prompt.
@@ -162,11 +163,11 @@ The `password` backend never uses `HTTP(S)_PROXY`, `ALL_PROXY` or the system pro
 
 ## Backends
 
-| Backend | When | How it signs in | Limits |
+| Backend | When | How it signs in | Notes |
 |---|---|---|---|
-| `password` (default) | From any computer that reaches DSM over HTTPS (LAN, VPN, Tailscale) | The credential chain above | Needs an origin in the config. |
-| `chrome` | macOS only, when you are already signed in to DSM in Google Chrome and do not want to store a password anywhere | Runs same-origin requests inside the DSM tab via AppleScript (Chrome: View > Developer > Allow JavaScript from Apple Events) | No uploads (`upgrade`, `alert-deploy`), no package web UIs (`tailscale`). |
-| `local` | On the NAS itself as root (DSM Task Scheduler), e.g. what `alert-deploy` installs | None: `/usr/syno/bin/synowebapi --exec` runs the API as the system | Only on the NAS, only as root. Tailscale status via the `tailscale` binary. |
+| `password` (default) | From any computer that reaches DSM over HTTPS (LAN, VPN, Tailscale) | The credential chain above | Uses `origins` from the config. |
+| `chrome` | macOS only, when you are already signed in to DSM in Google Chrome and do not want to store a password anywhere | Runs same-origin requests inside the DSM tab via AppleScript (Chrome: View > Developer > Allow JavaScript from Apple Events) | `upgrade`, `alert-deploy` and `tailscale` run with `--backend password`. |
+| `local` | On the NAS itself as root (DSM Task Scheduler), e.g. what `alert-deploy` installs | None: `/usr/syno/bin/synowebapi --exec` runs the API as the system | Runs on the NAS as root. Tailscale status via the `tailscale` binary. |
 
 ## Incident quick start
 
@@ -190,31 +191,33 @@ If the audit shows `ransomware_files FAIL` or `external_signins FAIL` you are pa
 
 ## `nas incident fix`
 
-Runs the audit, prints the plan, asks (unless `--yes`; without a terminal it does not apply anything without `--yes`), applies the changes in this order, reads each one back, then runs the audit again and prints before -> after. `--dry-run` prints the plan and the exact calls and sends no write. Exit status 1 when a change fails or the final audit still has a FAIL.
+Runs the audit, prints the plan, asks for confirmation (`--yes`, `NAS_YES=1` or `assume_yes: true` answer yes; without a terminal and without those it exits 3 with `Not applied: add --yes (or NAS_YES=1).`), applies the changes in this order, reads each one back, then runs the audit again and prints before -> after. `--dry-run` prints the plan and the exact calls and sends no write. Exit status 1 when a change fails or the final audit still has a FAIL.
 
 Order: `snapshot_worm` -> `snapshots` -> `packages` -> `smb_min_protocol` -> `quickconnect` -> `router_port_forwarding` -> `autoblock` -> `admin_account` -> `firewall` -> `rotate_password` (opt-in) -> `upgrade` (opt-in, reboots).
 
 | Fix | What changes | DSM web UI (manual way) | Raw call (`nas api ... --allow-write`) |
 |---|---|---|---|
 | `snapshot_worm` | Immutable-snapshot lock off on shares where the model lacks immutable snapshots (gated like `snapshots`: the share's schedule starts taking snapshots again) | Snapshot Replication > Snapshots > Settings (the option is hidden on unsupported models, so the API is the only way) / Snapshot Replication > 快照 > 設定 | `SYNO.DisasterRecovery.Retention set_worm_lock --version 1 type=Share name=SHARE worm_lock_enable=false worm_lock_day=7` |
-| `snapshots` | Create a daily schedule (`incident.snapshot_hour:minute`) on shares that have none, with retention by days (`incident.snapshot_retain_days`, 14) only where the share has no retention policy yet. Existing schedules, enabled or not, and existing retention are left alone. Refused unless the same run's `--ransom-scan` came back clean or `--i-know-snapshots-may-rotate` is given: snapshots that start being taken apply retention, which can delete the older snapshots needed to recover encrypted files | Snapshot Replication > Snapshots > select the share > Settings > Schedule / Retention Policy (Snapshot Replication > 快照 > 設定 > 排程 / 保留原則) | `SYNO.Core.Share.Snapshot set_schedule --version 1 name=SHARE enable_snapshot_schedule=true 'schedule={...}' task_id=-1` then `SYNO.DisasterRecovery.Retention set --version 1 name=SHARE type=Share policyType=64 retainDay=14 ...` |
+| `snapshots` | Create a daily schedule (`incident.snapshot_hour:minute`) on shares that have none, with retention by days (`incident.snapshot_retain_days`, 14) only where the share has no retention policy yet. Existing schedules, enabled or not, and existing retention are left alone. Runs after a clean `--ransom-scan` in the same run, or with `--i-know-snapshots-may-rotate` / `--force`: snapshots that start being taken apply retention, which deletes the oldest snapshots | Snapshot Replication > Snapshots > select the share > Settings > Schedule / Retention Policy (Snapshot Replication > 快照 > 設定 > 排程 / 保留原則) | `SYNO.Core.Share.Snapshot set_schedule --version 1 name=SHARE enable_snapshot_schedule=true 'schedule={...}' task_id=-1` then `SYNO.DisasterRecovery.Retention set --version 1 name=SHARE type=Share policyType=64 retainDay=14 ...` |
 | `packages` | Stop running packages named in SA-26:14 (update or uninstall them yourself) | Package Center > Installed > package > Update or Stop (套件中心 > 已安裝) | `SYNO.Core.Package.Control stop --version 1 id=PHP7.4` |
 | `smb_min_protocol` | Minimum SMB protocol SMB2 (SMB1-only clients lose access) | Control Panel > File Services > SMB > Advanced Settings (控制台 > 檔案服務 > SMB > 進階設定) | `SYNO.Core.FileServ.SMB set --version 3 smb_min_protocol=1 smb_max_protocol=3` |
 | `quickconnect` | QuickConnect off, and its automatic router port forwarding off | Control Panel > External Access > QuickConnect (控制台 > 外部存取 > QuickConnect) | `SYNO.Core.QuickConnect set --version 2 enabled=false`; `SYNO.Core.QuickConnect.Upnp set --version 1 enabled=false` |
 | `router_port_forwarding` | Disable (not delete) the router port-forwarding rules DSM manages over UPnP/NAT-PMP | Control Panel > External Access > Router Configuration (控制台 > 外部存取 > 路由器設定); also check the router's own page | `SYNO.Core.PortForwarding.Rules save --version 1 'rules=[...enable:false...]' task_id_suffix=PF`, poll `save_status` |
 | `autoblock` | AutoBlock on (10 attempts / 5 min); allow-list this computer's address as DSM logged it, the IPv4 `allowed_networks`, and `127.0.0.1` only with `incident.autoblock_allow_loopback` | Control Panel > Security > Protection > Auto Block; Allow/Block List (控制台 > 安全性 > 保護) | `SYNO.Core.Security.AutoBlock set --version 1 enable=true attempts=10 within_mins=5 enable_expire=false expire_day=0`; `SYNO.Core.Security.AutoBlock.Rules create --version 1 type=allow block_days=0 overwrite=true 'ip=["127.0.0.1"]'` |
-| `admin_account` | Disable the built-in `admin`. Refused when the CLI is signed in as `admin`, when the account of a pasted `NAS_SID` session cannot be resolved (`SYNO.Core.Desktop.Initdata`), or when no other enabled member of `administrators` exists. `SYNO.Core.User set` answers 105 from a password session, so it runs as root in a temporary Task Scheduler task that is deleted afterwards | Control Panel > User & Group > admin > Edit > Disable this account (控制台 > 使用者與群組) | root task script: `/usr/syno/bin/synowebapi --exec api=SYNO.Core.User method=set version=1 name='"admin"' expired='"now"'` (with `--backend local`: `SYNO.Core.User set --version 1 name=admin expired=now`) |
+| `admin_account` | Disable the built-in `admin`. Checks first whether the CLI is signed in as `admin`, which account a pasted `NAS_SID` session uses (`SYNO.Core.Desktop.Initdata`), and whether another enabled member of `administrators` exists; `--force-admin` (or `--force`) applies it whatever those checks say. `SYNO.Core.User set` answers 105 from a password session, so it runs as root in a temporary Task Scheduler task that is deleted afterwards | Control Panel > User & Group > admin > Edit > Disable this account (控制台 > 使用者與群組) | root task script: `/usr/syno/bin/synowebapi --exec api=SYNO.Core.User method=set version=1 name='"admin"' expired='"now"'` (with `--backend local`: `SYNO.Core.User set --version 1 name=admin expired=now`) |
 | `firewall` | Enable the firewall; allow rules (this computer's `/32` as DSM logged it + IPv4 `allowed_networks`) on the LAN interfaces (`global` only when the profile has no LAN interface); every interface except `global` (eth*, pppoe, ppp0, vpn, wlan0, ...) drops unmatched traffic; rules that allow any source are removed | Control Panel > Security > Firewall > Edit Rules (控制台 > 安全性 > 防火牆 > 編輯規則) | `SYNO.Core.Security.Firewall.Profile set --version 1 'profile={...}' profile_applying=false`, then `SYNO.Core.Security.Firewall.Profile.Apply start --version 1 name=default profile_applying=false`, poll `status task_id=...`, `stop` |
-| `rotate_password` (`--rotate-password`) | New random 24-character password for the signed-in account. Written to the store first (1Password item via `op item edit` on stdin, keeping the old value in the item history; or the keychain entry, with the old value copied to `<store_service>-previous`), then changed in DSM; if DSM refuses, the old password goes back into the store; if the DSM call is interrupted the store keeps the new one. Read back and a fresh login verified. Never printed. Refused when the password comes from a command, env or prompt | Personal > Account > change password (個人 > 帳號) | `SYNO.Core.NormalUser set --version 2 password=... old_password=...` |
+| `rotate_password` (`--rotate-password`) | New random 24-character password for the signed-in account. Written to the store first (1Password item via `op item edit` on stdin, keeping the old value in the item history; or the keychain entry, with the old value copied to `<store_service>-previous`), then changed in DSM; if DSM rejects it, the old password goes back into the store; if the DSM call is interrupted the store keeps the new one. Read back and a fresh login verified. Never printed. Writes to 1Password or the keychain entry; for a password from a command, env or prompt, change it in DSM and in that source | Personal > Account > change password (個人 > 帳號) | `SYNO.Core.NormalUser set --version 2 password=... old_password=...` |
 | `upgrade` (`--upgrade`) | Download the newest official `.pat`, upload, PreCheck, install; the NAS reboots | Control Panel > Update & Restore > Manual DSM Update (控制台 > 更新與還原) | `nas upgrade --yes` |
 
-**Firewall lockout guard.** The firewall change is refused when: HTTP(S) proxies are configured for the origin; the origin is a loopback address (SSH tunnel, local proxy) or a public address; the newest successful sign-in of this account in DSM's connection log shows a loopback, IPv6 or public source; or that logged source differs from the local address this computer uses to reach the NAS (NAT, a proxy, or the sign-in came from another device). The allowed set always contains the address DSM logged. After applying, it signs in again over the same origin from scratch; if that fails it prints rescue steps: another computer on the LAN, Synology Assistant / find.synology.com, Tailscale userspace mode (DSM sees `127.0.0.1`, which the firewall did not filter in testing), and the RESET button (mode 1). IPv6 allow-list entries are not written as rules, so IPv6 sources are dropped. `100.64.0.0/10` (Tailscale) is also the range CGNAT ISPs use on the WAN side: on a NAS that dials PPPoE itself, a `global` allow rule for it would admit other subscribers, which is why the rules go on the LAN interfaces.
+**Firewall lockout check.** Before the firewall change the CLI checks, and lists in the plan: HTTP(S) proxies are configured for the origin; the origin is a loopback address (SSH tunnel, local proxy) or a public address; the newest successful sign-in of this account in DSM's connection log shows a loopback, IPv6 or public source; or that logged source differs from the local address this computer uses to reach the NAS (NAT, a proxy, or the sign-in came from another device). When a check does not pass, the change waits for `--force-firewall` (or `--force`), which applies it with the check result in the plan note. The allowed set contains the address DSM logged. After applying, it signs in again over the same origin from scratch; if that fails it prints rescue steps: another computer on the LAN, Synology Assistant / find.synology.com, Tailscale userspace mode (DSM sees `127.0.0.1`, which the firewall did not filter in testing), and the RESET button (mode 1). IPv6 allow-list entries are not written as rules, so IPv6 sources are dropped. `100.64.0.0/10` (Tailscale) is also the range CGNAT ISPs use on the WAN side: on a NAS that dials PPPoE itself, a `global` allow rule for it would admit other subscribers, which is why the rules go on the LAN interfaces.
 
 **A NAS with its own public address** (it dials PPPoE itself, or sits in a DMZ) has no router NAT in front of it: the DSM firewall is then the only layer between every DSM service and the internet. QuickConnect and UPnP port forwarding open DSM to the internet even behind NAT.
 
 ## Other commands
 
 ```bash
+nas setup --origin URL --user USER --password-source SOURCE   # write the config, sign in once, pin the certificate
+nas doctor        # config, credentials, origin, TLS, login, DSM version, 2FA, capabilities, clock
 nas whoami        # backend, origin, credential source, session, account, admin flag, DSM version
 nas status        # model, DSM version, uptime, SA-26:13 verdict
 nas net           # interfaces, PPPoE (public address), firewall, gateway
@@ -235,7 +238,9 @@ nas config init [--force] | nas config show
 nas trust | nas trust --reset https://HOST:PORT                # TLS certificates trusted on first use
 nas api SYNO.Core.System info --version 1                     # any DSM API; writes need --allow-write
 nas --json <command>                                          # JSON output for everything
-nas --no-input <command>                                      # never prompt; exit 3 when input would be needed (also NAS_NO_INPUT=1; automatic without a terminal)
+nas --no-input <command>                                      # prompts answer with exit 3 (also NAS_NO_INPUT=1; automatic without a terminal)
+nas --yes <command>                                           # accept every confirmation (also NAS_YES=1, config assume_yes)
+nas --force incident fix --yes                                # apply changes whose checks do not pass (--force-firewall, --force-admin, snapshot rotation, reinstall)
 nas mcp                                                       # MCP server on stdio (docs/MCP.md)
 ```
 
@@ -251,13 +256,13 @@ Three ways to run it:
 
 Receivers: any HTTPS endpoint that takes a JSON POST with one header (generic JSON receiver), a chat-bot "routine" webhook that starts an agent run per POST (Grok-Bot-style), or no webhook at all: DSM's built-in notifications (email, Synology mobile push through the DS finder / Synology app) cover DSM's own warning/error events. All three are in [`docs/ALERTS.md`](docs/ALERTS.md#receivers).
 
-## Safety notes
+## What changes the NAS
 
-- Every command is read-only except: `incident fix` (asks, or `--yes`), `upgrade` (without `--yes` it still uploads the `.pat` and runs PreCheck, then deletes the upload; `--yes` installs), `pkg start|stop|install|uninstall|default-volume VOL`, `volume atime`, `tailscale login-url`, `alert-deploy`, `login --save` / `logout --forget` (local keychain only), `trust --reset` (local file), and `api` with `--allow-write`. `ransom-scan`, `incident --scan` and `incident fix --ransom-scan` create temporary File Station search tasks on the NAS (stopped and cleaned afterwards). `nas api` refuses methods that do not look like reads unless `--allow-write` is given.
+- Commands that change the NAS: `incident fix` (asks, or `--yes`), `upgrade` (without `--yes` it still uploads the `.pat` and runs PreCheck, then deletes the upload; `--yes` installs), `pkg start|stop|install|uninstall|default-volume VOL`, `volume atime`, `tailscale login-url`, `alert-deploy`, `login --save` / `logout --forget` (local keychain only), `trust --reset` (local file), and `api` with `--allow-write`. `ransom-scan`, `incident --scan` and `incident fix --ransom-scan` create temporary File Station search tasks on the NAS (stopped and cleaned afterwards). `nas api` sends methods that are not reads with `--allow-write`, `--yes` or `NAS_YES=1`.
 - `incident fix --dry-run` prints every write call it would send. The plan always shows current -> new values.
 - Passwords, SIDs and SynoTokens are never printed. `nas api` prints raw DSM output, which can include serial numbers and account names; the other commands filter those.
-- Each password sign-in that fails counts toward AutoBlock. The CLI never retries a failed password.
-- `alert-deploy` installs code that runs as root on the NAS; the code lives outside the shared folders so share users cannot change it.
+- Each password sign-in that fails counts toward AutoBlock; the CLI reports a failed sign-in once and stops.
+- `alert-deploy` installs code that runs as root on the NAS in a root-only folder outside the shared folders.
 
 ## Tests
 

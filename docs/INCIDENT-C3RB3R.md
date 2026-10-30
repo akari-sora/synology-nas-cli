@@ -77,7 +77,7 @@ Verdicts: known-bad hit = FAIL; unknown entries (cron lines outside Synology pat
 
 How `--deep` runs:
 
-- `--backend password`: a temporary root task in Task Scheduler (`SYNO.Core.TaskScheduler.Root create` after `SYNO.Core.User.PasswordConfirm`, `run` v2, deleted afterwards) runs one Python script (zlib + base64 in the task script). It refuses a symlinked `deploy.stage_dir`, writes one file `<stage_dir>/nas-deep-<random>.json` with `O_CREAT|O_EXCL|O_NOFOLLOW`, carrying the random marker; the CLI reads it with File Station, checks the marker and deletes it. `deploy.stage_dir` must be set (a folder in a shared folder the account can write; created if missing).
+- `--backend password`: a temporary root task in Task Scheduler (`SYNO.Core.TaskScheduler.Root create` after `SYNO.Core.User.PasswordConfirm`, `run` v2, deleted afterwards) runs one Python script (zlib + base64 in the task script). It stops when `deploy.stage_dir` is a symlink, writes one file `<stage_dir>/nas-deep-<random>.json` with `O_CREAT|O_EXCL|O_NOFOLLOW`, carrying the random marker; the CLI reads it with File Station, checks the marker and deletes it. `deploy.stage_dir` must be set (a folder in a shared folder the account can write; created if missing).
 - `--backend local` (on the NAS as root): the same script runs directly and prints the JSON.
 - Nothing else is written; the script only reads.
 

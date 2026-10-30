@@ -20,6 +20,8 @@ DEFAULT_PATH = "~/.config/synology-nas-cli/config.json"
 DEFAULTS = {
     # Label used in webhook bodies and as the DSM notification prefix ("[name]").
     "name": "nas",
+    # Accept every confirmation (same as --yes / NAS_YES=1): incident fix, upgrade, api writes, MCP write tools.
+    "assume_yes": False,
     # DSM origins for --backend password, tried in order (first one that accepts TCP wins).
     "origins": [],
     # Origins whose Chrome tab --backend chrome may use (default: "origins").
@@ -269,6 +271,17 @@ def load(path: str | None = None) -> dict:
     cfg["chrome_origins"] = [o.rstrip("/") for o in cfg["chrome_origins"]] or list(cfg["origins"])
     _cfg = cfg
     _path = loaded
+    return cfg
+
+
+def load_defaults() -> dict:
+    """Built-in defaults plus environment, ignoring the file (for `nas doctor` / `nas setup` on a broken file)."""
+    global _cfg, _path
+    _path = None
+    cfg = copy.deepcopy(DEFAULTS)
+    _apply_env(cfg)
+    cfg["chrome_origins"] = cfg["chrome_origins"] or list(cfg["origins"])
+    _cfg = cfg
     return cfg
 
 

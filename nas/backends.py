@@ -561,9 +561,11 @@ class PasswordBackend:
             code = (r.get("error") or {}).get("code")
             hint = LOGIN_HINTS.get(code, "")
             cls = Blocked if code == 407 else Unreachable if code in (498, 499) else AuthFailed
-            raise cls("DSM login failed: "
-                           + describe_error("SYNO.API.Auth", {"error": r.get("error"), "version": version})
-                           + (f"\n{hint}" if hint else ""))
+            exc = cls("DSM login failed: "
+                      + describe_error("SYNO.API.Auth", {"error": r.get("error"), "version": version})
+                      + (f"\n{hint}" if hint else ""))
+            exc.code = code  # DSM's login error code (400, 403, 407, ...)
+            raise exc
         self.account = account
         self._sid = r["data"]["sid"]
         self._token = r["data"].get("synotoken")

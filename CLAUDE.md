@@ -11,6 +11,7 @@
 - `nas/commands.py`: read-only commands, raw `api`, shared helpers (`snapshot_state`, `public_addresses`, `probe_ports`, `fetch_connection_log`).
 - `nas/incident.py`: `gather` (reads) -> `evaluate` (items) -> `plan` (changes, `FIX_ORDER`) -> `fix` (confirm, apply, verify, audit again). `UI` holds the DSM menu paths printed with each change.
 - `nas/ioc.py`: C3RB3R indicators of compromise: connection-log scan (`exploit_attempts`), `COLLECTOR` (Python 3.8 script run as root by `--deep`; reads only, writes one O_EXCL|O_NOFOLLOW result file with a random marker), verdicts (`evaluate_deep`). Log text is data: `clean()` before display. `tests/ioc_check.py` runs the collector against a fake root tree.
+- `nas/onboard.py`: `nas setup` (collects missing fields as `{missing: [{field, why, ask_user}]}` before writing anything; merges into the config file; one sign-in) and `nas doctor` (`{checks: [{name, status, detail, next_step}]}`). `tests/onboard_check.py` drives both against a fake DSM over HTTPS.
 - `nas/mcp.py`: `nas mcp` (stdio MCP server; tools build CLI argv and call the same command functions). `nas/errors.py`: `NasError` subclasses with `exit_code` (docs/EXIT-CODES.md) and the `--no-input` switch (`can_prompt`).
 - `schemas/`: JSON Schemas of `--json` outputs, checked by `tests/schema_check.py`; update them when an output changes.
 - `nas/alert.py` (`alert`, `--push`), `nas/selfmon.py` (`alert-deploy`), `nas/upgrade.py`, `nas/manage.py` (`pkg`, `volume`, `tailscale`), `nas/advisories.py` (SA-26:13 / SA-26:14 tables).
@@ -22,7 +23,8 @@
 - Standard library only. Code runs on Python 3.8 (DSM's interpreter, used by `--backend local` and `alert-deploy`): keep `from __future__ import annotations`; no `str.removeprefix`, `dict | dict`, `functools.cache`, `zoneinfo`, `argparse.BooleanOptionalAction`, or runtime `list[str]`.
 - Commands return `(lines, data)` or `(lines, data, exit_code)`; `--json` prints `data`.
 - Expected failures raise `nas.errors.NasError` or a subclass (re-exported by `backends`); `cli.main` prints them as `nas: ...` and exits with the class's `exit_code`.
-- Prompts go through `errors.can_prompt()`; nothing reads stdin when it is false (`nas mcp` uses stdin for the protocol).
+- Prompts go through `errors.can_prompt()`; nothing reads stdin when it is false (`nas mcp` uses stdin for the protocol). Confirmations accept `--yes` / `NAS_YES=1` / config `assume_yes` (`cli.assume_yes`). Checks that hold a change back name their override in the message (`--force-firewall`, `--force-admin`, `--i-know-snapshots-may-rotate`, `--force`).
+- Global switches (`--json`, `--no-input`, `--yes`, `--force`) are accepted before or after the command (`cli.GLOBAL_FLAGS`).
 - Site-specific values (addresses, share names, account names, webhook names, paths on the NAS) live in the config file; the code holds defaults only.
 - Secrets (passwords, SIDs, SynoTokens, webhook headers) are never printed, logged or put on a command line. Commands with a secret go through stdin (`security -i`, `secret-tool store`, `op item edit`).
 - DSM parameters are passed as Python values; `backends._encode_params` JSON-encodes them. Fields that need "a string containing JSON" are `json.dumps`ed once more by the caller.

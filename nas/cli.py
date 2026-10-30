@@ -8,12 +8,14 @@ import os
 import sys
 import traceback
 
-from . import __version__, alert, commands, config, incident, manage, selfmon, upgrade
+from . import __version__, alert, commands, config, incident, manage, onboard, selfmon, upgrade
 from .backends import NasError, PasswordBackend, open_session
 from .errors import set_no_input
 from .credentials import Credentials
 
 COMMANDS = {
+    "setup": (None, "write the config and sign in once; reports missing information as JSON (exit 3)"),
+    "doctor": (None, "check config, credentials, origin, TLS, login, DSM version, 2FA, capabilities, clock"),
     "whoami": (commands.whoami, "log in and show backend, origin, credential source, account, admin flag, DSM version"),
     "status": (commands.status, "model, DSM version, uptime, SA-26:13 verdict"),
     "net": (commands.net, "interfaces, PPPoE, firewall"),
@@ -39,7 +41,7 @@ COMMANDS = {
     "api": (commands.raw_api, "raw DSM API call (writes need --allow-write)"),
 }
 
-NO_SESSION = ("config", "login", "logout", "trust", "mcp")
+NO_SESSION = ("config", "login", "logout", "trust", "mcp", "setup", "doctor")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -59,8 +61,12 @@ def build_parser() -> argparse.ArgumentParser:
                                      "(overrides credentials.op_username/op_password)")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument("--no-input", action="store_true",
-                   help="never prompt or wait for confirmation; fail with exit code 3 instead (also NAS_NO_INPUT=1, "
-                        "and automatic when stdin is not a terminal)")
+                   help="answer prompts with exit code 3 instead of waiting (also NAS_NO_INPUT=1, and automatic when "
+                        "stdin is not a terminal)")
+    p.add_argument("--yes", dest="global_yes", action="store_true",
+                   help="accept every confirmation (also NAS_YES=1 or config assume_yes)")
+    p.add_argument("--force", dest="global_force", action="store_true",
+                   help="apply every override at once (--force-firewall, --force-admin, snapshot rotation, reinstall)")
     sub = p.add_subparsers(dest="cmd", required=True, metavar="command")
     for name, (_, help_text) in COMMANDS.items():
         sp = sub.add_parser(name, help=help_text, description=help_text)
@@ -144,6 +150,10 @@ def build_parser() -> argparse.ArgumentParser:
             g.add_argument("--rotate-password", action="store_true",
                            help="also change this account's password to a random one and store it (1Password/keychain)")
             g.add_argument("--ransom-scan", action="store_true", help="also run the ransom-note scan (same as --scan)")
+            g.add_argument("--force-firewall", action="store_true",
+                           help="apply the firewall change even when the lockout check does not pass")
+            g.add_argument("--force-admin", action="store_true",
+                           help="disable admin even when it is the signed-in or only enabled administrator")
             g.add_argument("--i-know-snapshots-may-rotate", action="store_true",
                            help="allow the snapshot fixes without a clean --ransom-scan (starting snapshots applies "
                                 "retention, which can delete older snapshots)")
@@ -156,6 +166,31 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "logout":
             sp.add_argument("--forget", action="store_true",
                             help="also delete the keychain entry and the trusted-device token")
+        if name == "setup":
+            sp.add_argument("--origin", dest="setup_origin", action="append", metavar="URL",
+                            help="DSM address, e.g. https://192.168.0.10:5001 (repeatable; LAN first, then VPN)")
+            sp.add_argument("--user", help="DSM account (an administrator)")
+            sp.add_argument("--password-source", metavar="SOURCE",
+                            help="op:op://VAULT/ITEM/FIELD | command:CMD | keychain | env | prompt")
+            sp.add_argument("--otp-source", metavar="SOURCE", help="op | command:CMD | prompt | none")
+            sp.add_argument("--otp-code", metavar="CODE", help="current 2-step code for this one login")
+            sp.add_argument("--trust-device", action="store_true",
+                            help="ask DSM for a trusted-device token so later logins need no code")
+            sp.add_argument("--save-to-keychain", action="store_true",
+                            help="store the password in the OS keychain (from --password-stdin or a prompt)")
+            sp.add_argument("--password-stdin", action="store_true", help="read the password from one stdin line")
+            sp.add_argument("--tls", choices=["pin", "verify"], help="pin (default): trust on first use; verify: system CAs")
+            sp.add_argument("--allowed-network", action="append", metavar="CIDR",
+                            help="network allowed by incident fix's firewall/AutoBlock, e.g. 192.168.0.0/24 (repeatable)")
+            sp.add_argument("--stage-dir", metavar="PATH",
+                            help="folder in a writable shared folder for incident --deep and alert-deploy, "
+                                 "e.g. /SHARE/.nas-cli-deploy")
+            sp.add_argument("--webhook-file", metavar="PATH", help='JSON {"url", "header"} for alert --push / alert-deploy')
+            sp.add_argument("--config", metavar="PATH", help="config file to write (default: NAS_CONFIG or "
+                                                             "~/.config/synology-nas-cli/config.json)")
+        if name == "mcp":
+            sp.add_argument("--auto-confirm", action="store_true",
+                            help="write tools apply directly (also NAS_YES=1 or config assume_yes)")
         if name == "trust":
             sp.add_argument("--reset", metavar="ORIGIN",
                             help="forget the certificate trusted for ORIGIN (e.g. https://192.0.2.10:5001); "
@@ -172,16 +207,35 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+GLOBAL_FLAGS = ("--json", "--no-input", "--yes", "--force")
+
+
+def assume_yes(flag: bool = False) -> bool:
+    return bool(flag or os.environ.get("NAS_YES", "") not in ("", "0") or config.get().get("assume_yes"))
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = build_parser()
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # global switches work before or after the command
+    found = {a for a in argv if a in GLOBAL_FLAGS}
+    rest = [a for a in argv if a not in GLOBAL_FLAGS]
     # parse_known_args: `nas api X m --version 2 k=v` leaves k=v after an
     # option unparsed; fold those back into params instead of erroring.
-    args, extra = parser.parse_known_args(argv)
+    args, extra = parser.parse_known_args(rest)
     if extra:
         if args.cmd == "api" and all("=" in x and not x.startswith("-") for x in extra):
             args.params += extra
         else:
             parser.error("unrecognized arguments: " + " ".join(extra))
+    args.json = args.json or "--json" in found
+    args.no_input = args.no_input or "--no-input" in found
+    args.assume_yes = assume_yes(args.global_yes or "--yes" in found)
+    if args.assume_yes:
+        args.yes = True
+    elif not hasattr(args, "yes"):
+        args.yes = False
+    args.force = bool(getattr(args, "force", False) or args.global_force or "--force" in found)
     return args
 
 
@@ -263,11 +317,16 @@ def logout_cmd(args, lan):
 
 
 def main(argv: list[str] | None = None) -> int:
+    config_error = None
     try:
         config.load()
     except config.ConfigError as e:
-        print(f"nas: {e}", file=sys.stderr)
-        return 2
+        words = sys.argv[1:] if argv is None else argv
+        if "doctor" not in words and "setup" not in words:
+            print(f"nas: {e}", file=sys.stderr)
+            return 2
+        config_error = str(e)
+        config.load_defaults()
     args = parse_args(argv)
     if args.no_input:
         set_no_input(True)
@@ -279,17 +338,29 @@ def main(argv: list[str] | None = None) -> int:
         config.get()["credentials"]["op_password"] = args.op_item.rstrip("/") + "/password"
     if args.cmd == "mcp":
         from .mcp import serve
-        return serve(sys.stdin, sys.stdout, lambda: open_session(args.backend, origins, lan, renew=True))
+        return serve(sys.stdin, sys.stdout, lambda: open_session(args.backend, origins, lan, renew=True),
+                     auto_confirm=args.auto_confirm or args.assume_yes)
     if args.cmd in NO_SESSION:
         try:
             if args.cmd == "config":
                 lines, data = config_cmd(args)
             elif args.cmd == "trust":
                 lines, data = trust_cmd(args)
+            elif args.cmd in ("setup", "doctor"):
+                if args.cmd == "setup":
+                    args.origin = args.setup_origin
+                    lines, data, rc = onboard.setup(args)
+                else:
+                    lines, data, rc = onboard.doctor(args, config_error)
+                print(json.dumps(data, ensure_ascii=False, indent=2, default=str) if args.json else "\n".join(lines))
+                return rc
             elif args.cmd == "login":
                 lines, data = login_cmd(args, lan)
             else:
                 lines, data = logout_cmd(args, lan)
+        except config.ConfigError as e:
+            print(f"nas: {e}", file=sys.stderr)
+            return 2
         except NasError as e:
             print(f"nas: {e}", file=sys.stderr)
             return e.exit_code

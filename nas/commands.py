@@ -733,8 +733,9 @@ def is_read_method(method: str) -> bool:
 
 def raw_api(s, args):
     if not is_read_method(args.method):
-        if not args.allow_write:
-            raise NasError(f"method {args.method!r} looks like a write; pass --allow-write to send it")
+        if not (args.allow_write or getattr(args, "assume_yes", False)):
+            from .errors import InputRequired
+            raise InputRequired(f"{args.method!r} is a write method: add --allow-write (or --yes / NAS_YES=1).")
     params = {}
     for kv in args.params:
         if "=" not in kv:

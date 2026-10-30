@@ -40,7 +40,7 @@ nas incident fix --ransom-scan --yes            # a clean scan also allows the s
 nas incident fix --upgrade --rotate-password --yes   # + DSM upgrade (asks again on PreCheck notes) + new random password
 ```
 
-Order applied: snapshot_worm, snapshots, packages, smb_min_protocol, quickconnect, router_port_forwarding, autoblock, admin_account, firewall, rotate_password, upgrade. Without a terminal and without `--yes` nothing is applied.
+Order applied: snapshot_worm, snapshots, packages, smb_min_protocol, quickconnect, router_port_forwarding, autoblock, admin_account, firewall, rotate_password, upgrade. `--yes` / `NAS_YES=1` / config `assume_yes` confirm; without a terminal and without them the command exits 3 with `Not applied: add --yes (or NAS_YES=1).` `--force-firewall`, `--force-admin`, `--i-know-snapshots-may-rotate`, or `--force` for all of them, apply changes whose checks do not pass; the plan line of each such change names its override.
 
 | Fix | CLI | DSM web UI | Raw call |
 |---|---|---|---|
@@ -58,11 +58,11 @@ Order applied: snapshot_worm, snapshots, packages, smb_min_protocol, quickconnec
 
 Raw calls are written as `nas api NAME METHOD --version N k=v ... --allow-write`; `--dry-run` prints the exact ones with current values.
 
-Firewall facts: the allowed set is the address DSM logged for this session (`/32`) plus the IPv4 `allowed_networks` (empty = this computer only; IPv6 entries are not written, so IPv6 sources are dropped), placed on the LAN interfaces (`global` when the profile has none). The change is refused when proxies are configured, the origin is loopback or public, or the logged source is loopback/IPv6/public or differs from this computer's local address. After applying, a fresh login over the same origin is verified; on failure the output lists rescue paths (another LAN computer, Synology Assistant / find.synology.com, Tailscale userspace mode reaches DSM as 127.0.0.1, RESET button mode 1). A NAS with its own public address (PPPoE on the NAS, DMZ) has no NAT in front: the DSM firewall is the only layer, and 100.64.0.0/10 there is also the CGNAT range on the WAN side.
+Firewall facts: the allowed set is the address DSM logged for this session (`/32`) plus the IPv4 `allowed_networks` (empty = this computer only; IPv6 entries are not written, so IPv6 sources are dropped), placed on the LAN interfaces (`global` when the profile has none). Checks before the change: proxies configured, origin loopback or public, logged source loopback/IPv6/public or different from this computer's local address; when one does not pass the change waits for `--force-firewall` (or `--force`). After applying, a fresh login over the same origin is verified; on failure the output lists rescue paths (another LAN computer, Synology Assistant / find.synology.com, Tailscale userspace mode reaches DSM as 127.0.0.1, RESET button mode 1). A NAS with its own public address (PPPoE on the NAS, DMZ) has no NAT in front: the DSM firewall is the only layer, and 100.64.0.0/10 there is also the CGNAT range on the WAN side.
 
-Snapshot fixes: starting snapshots applies the share's retention policy, which can delete older snapshots that are needed to restore encrypted files; `snapshot_worm` and `snapshots` therefore run only after a clean `--ransom-scan` in the same run, or with `--i-know-snapshots-may-rotate`.
+Snapshot fixes: starting snapshots applies the share's retention policy, which can delete older snapshots that are needed to restore encrypted files; `snapshot_worm` and `snapshots` run after a clean `--ransom-scan` in the same run, or with `--i-know-snapshots-may-rotate` / `--force`.
 
-Password rotation needs a writable store: a 1Password reference (written with `op item edit` on stdin; the old value stays in the item history) or the keychain entry from `nas login --save` (old value copied to `<store_service>-previous`). The store is written before DSM is changed; a DSM refusal puts the old password back. Disabling `admin` needs another enabled administrator. Other administrator accounts and service accounts are changed in Control Panel > User & Group.
+Password rotation needs a writable store: a 1Password reference (written with `op item edit` on stdin; the old value stays in the item history) or the keychain entry from `nas login --save` (old value copied to `<store_service>-previous`). The store is written before DSM is changed; a DSM refusal puts the old password back. Disabling `admin` checks for another enabled administrator; `--force-admin` applies it either way. Other administrator accounts and service accounts are changed in Control Panel > User & Group.
 
 ## 4. Restore from snapshots
 

@@ -105,8 +105,11 @@ rpc("notifications/initialized", notify=True)  # no reply expected
 assert rpc("ping")["result"] == {}
 
 tools = {x["name"]: x for x in rpc("tools/list")["result"]["tools"]}
-assert set(tools) == {"whoami", "status", "health", "net", "services", "logs", "alert", "incident_audit",
-                      "incident_fix", "pkg_list", "volume_list", "tailscale_status", "api_read"}, set(tools)
+assert set(tools) == {"setup", "doctor", "whoami", "status", "health", "net", "services", "logs", "alert",
+                      "incident_audit", "incident_fix", "pkg_list", "volume_list", "tailscale_status", "api_read"}, set(tools)
+for x in tools.values():
+    low = x["description"].lower()
+    assert not any(w in low for w in ("refused", "must not", "never ", "only the user", "be careful", "caution")), x["description"]
 for x in tools.values():
     assert x["inputSchema"]["type"] == "object" and x["description"] and "readOnlyHint" in x["annotations"]
 assert tools["incident_fix"]["annotations"]["destructiveHint"] is True and tools["status"]["annotations"]["readOnlyHint"]
@@ -141,7 +144,7 @@ rd = call("api_read", api="SYNO.Core.System", method="info", version=1)
 assert json.loads(rd["content"][0]["text"])["model"] == "DS000"
 before = len(sessions[0].sent)
 wr = call("api_read", api="SYNO.Core.FileServ.SMB", method="set", params={"smb_min_protocol": 0})
-assert wr["isError"] and "not a read method" in wr["content"][0]["text"] and len(sessions[0].sent) == before
+assert wr["isError"] and "is a write method" in wr["content"][0]["text"] and len(sessions[0].sent) == before
 
 # argument and protocol errors
 assert rpc("tools/call", {"name": "status", "arguments": {"x": 1}})["error"]["code"] == -32602
@@ -151,6 +154,22 @@ assert rpc("tools/call", {"name": "nope"})["error"]["code"] == -32602
 assert rpc("resources/list")["error"]["code"] == -32601
 send("{not json")
 assert json.loads(client_in.readline())["error"]["code"] == -32700
+
+# --auto-confirm: incident_fix applies without confirm
+auto = mcp.Server(factory, auto_confirm=True)
+res = json.loads(auto.call_tool("incident_fix", {"only": "smb_min_protocol"})["content"][0]["text"])
+assert res.get("results") and res["results"][0]["ok"], res
+# setup without anything configured: the missing-fields JSON, exit_code 3, no prompt
+import tempfile
+os.environ["NAS_CONFIG"] = os.path.join(tempfile.mkdtemp(), "c.json")
+st = mcp.Server(factory).call_tool("setup", {})
+body = json.loads(st["content"][0]["text"])
+assert st["_meta"]["exit_code"] == 3 and not st["isError"] and {m["field"] for m in body["missing"]} >= {
+    "origin", "password_source"}, body
+assert all(m["ask_user"].endswith("?") or m["ask_user"].endswith(".") for m in body["missing"])
+dr = mcp.Server(factory).call_tool("doctor", {})
+assert dr["_meta"]["exit_code"] == 1 and "checks" in json.loads(dr["content"][0]["text"])
+_env.use_config({})
 
 # a login failure becomes an error result with the CLI exit code, and the next call opens a new session
 def bad_factory():

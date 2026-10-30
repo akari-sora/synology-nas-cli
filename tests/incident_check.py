@@ -132,13 +132,17 @@ except NasError as e:
     assert "unknown fix name" in str(e)
 
 # --- admin: needs another enabled administrator and a known account ----------------------------------
-for st, why in [({"admins_resp": ok({"users": [{"name": "admin"}]})}, "no other enabled administrator"),
-                ({"admins_resp": err(105)}, "cannot list the administrators group")]:
+for st, why in [({"admins_resp": ok({"users": [{"name": "admin"}]})}, "admin is the only enabled administrator"),
+                ({"admins_resp": err(105)}, "the administrators group could not be read")]:
     n2 = FakeNas()
     n2.st.update(st)
     s2 = FakeSession(n2)
-    c = next(x for x in incident.plan(s2, incident.gather(s2, args()), args(only="admin_account")))
-    assert c["refused"] and why in c["refused"], c
+    f2 = incident.gather(s2, args())
+    c = next(x for x in incident.plan(s2, f2, args(only="admin_account")))
+    assert c["refused"] and why in c["refused"] and "(override: --force-admin)" in c["refused"], c
+    for flags in ({"force_admin": True}, {"force": True}):  # overridden: planned, the check result kept in the note
+        c = next(x for x in incident.plan(s2, f2, args(only="admin_account", **flags)))
+        assert not c["refused"] and why in c["note"] and "--force-admin" in c["note"], c
 s2 = FakeSession(FakeNas())
 s2.backend.account = None  # a pasted NAS_SID session: the account comes from Initdata
 c = next(x for x in incident.plan(s2, incident.gather(s2, args()), args(only="admin_account")))
@@ -154,7 +158,10 @@ cases = [
 for setup, why in cases:
     setup()
     c = incident.plan_firewall(s, f)
-    assert c["refused"] and why in c["refused"], (why, c["refused"])
+    assert c["refused"] and why in c["refused"] and "(override: --force-firewall)" in c["refused"], (why, c["refused"])
+    c = incident.plan_firewall(s, f, override=True)  # overridden: planned, the check result kept in the note
+    assert not c["refused"] and why in c["note"] and "applied because of --force-firewall" in c["note"], (why, c)
+    assert next(x for x in incident.plan(s, f, args(only="firewall", force=True)))["refused"] is None
     incident.client_address = lambda origin: ("192.0.2.50", "192.0.2.10")
     incident.get_proxies = lambda: {}
 for own, why in [([{"time": "2026/10/30 11:59:00", "descr": "User [ops] from [127.0.0.1] signed in to [DSM] successfully via [password]"}], "Tailscale userspace"),
@@ -182,7 +189,27 @@ assert "--allow-write" in text and "UI: Control Panel > Security > Firewall" in 
 # without --yes and without a terminal nothing is applied
 nas = FakeNas()
 lines, data, rc = incident.fix(FakeSession(nas), args(action="fix"))
-assert rc == 3 and "Not applied" in lines[-1] and "--no-input" in lines[-1] and all(is_read_method(m) for _, m in nas.sent)
+assert rc == 3 and lines[-1] == "Not applied: add --yes (or NAS_YES=1)." and all(is_read_method(m) for _, m in nas.sent)
+# auto-confirm from NAS_YES=1 or config assume_yes turns into --yes for the same command line
+import os
+from nas import cli
+os.environ["NAS_YES"] = "1"
+assert cli.parse_args(["incident", "fix"]).yes is True
+del os.environ["NAS_YES"]
+_env.use_config({"assume_yes": True})
+a = cli.parse_args(["incident", "fix"])
+assert a.yes is True and a.assume_yes is True
+_env.use_config({})
+a = cli.parse_args(["incident", "fix", "--json", "--force", "--no-input"])  # global switches after the command
+assert a.json and a.force and a.no_input and not a.yes
+assert cli.parse_args(["--yes", "incident", "fix"]).yes is True
+# snapshot gate: --force works like --i-know-snapshots-may-rotate
+n3 = FakeNas()
+s3 = FakeSession(n3)
+f3 = incident.gather(s3, args())
+gate = incident.plan(s3, f3, args(only="snapshots"))
+assert gate[0]["refused"] and "(override: --i-know-snapshots-may-rotate or --force)" in gate[0]["refused"]
+assert not incident.plan(s3, f3, args(only="snapshots", force=True))[0]["refused"]
 
 # --- fix: apply, read back, audit again ------------------------------------------------------------
 nas = FakeNas()

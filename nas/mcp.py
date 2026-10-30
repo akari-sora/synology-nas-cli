@@ -3,8 +3,8 @@
 JSON-RPC 2.0, one message per line on stdin/stdout (stdout carries nothing else; diagnostics go to
 stderr). Each tool runs the matching `nas` command with the same arguments and returns the same JSON
 as `nas --json <command>` as text content; `_meta.exit_code` is the exit status the command would
-have. Prompts are off (`--no-input`): a missing credential is an error result, never a wait.
-`incident_fix` only returns the dry-run plan unless the call has `"confirm": true`.
+have. Prompts answer with exit code 3 (`--no-input`). `incident_fix` returns the plan, or applies it
+when the call has `"confirm": true` or the server runs with `--auto-confirm` / NAS_YES=1.
 """
 
 from __future__ import annotations
@@ -14,16 +14,17 @@ import json
 import sys
 import traceback
 
-from . import __version__, alert, commands, incident, manage
+from . import __version__, alert, commands, config, incident, manage
 from .errors import NasError, set_no_input
 
 PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
 
 INSTRUCTIONS = (
-    "Tools wrap the `nas` CLI for one Synology NAS (DSM 7). Results are the JSON of `nas --json <command>`; "
-    "_meta.exit_code is the CLI exit status (0 ok, 1 findings/failure, 3 input required, 4 login failed, "
-    "5 AutoBlock, 6 unreachable, 7 certificate changed). incident_fix returns a plan unless confirm is true. "
-    "api_read accepts read methods only. Each failed login counts toward DSM's AutoBlock (10 in 5 minutes)."
+    "Tools wrap the `nas` CLI for one Synology NAS (DSM 7). Start with doctor; setup writes the config and returns "
+    "{missing: [{field, why, ask_user}]} for anything a person provides. Results are the JSON of `nas --json "
+    "<command>`; _meta.exit_code is the CLI exit status (0 ok, 1 findings/failure, 3 input needed, 4 login failed, "
+    "5 AutoBlock, 6 unreachable, 7 certificate changed). incident_fix returns the plan; confirm: true (or a server "
+    "started with --auto-confirm) applies it. DSM's AutoBlock blocks an address after 10 failed logins in 5 minutes."
 )
 
 READ = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
@@ -41,6 +42,28 @@ _LIST = {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "stri
 
 # name -> (description, input schema, annotations, argv builder)
 TOOLS = {
+    "setup": ("Write the config and sign in once (pins the certificate). Returns {missing: [{field, why, ask_user}]} "
+              "with exit_code 3 when a value is needed from a person; relay ask_user and call again with the answer.",
+              _obj({"origin": dict(_LIST, description="DSM address(es), e.g. https://192.168.0.10:5001"),
+                    "user": {"type": "string"},
+                    "password_source": {"type": "string", "description": "op:op://VAULT/ITEM/FIELD | command:CMD | "
+                                        "keychain | env"},
+                    "otp_source": {"type": "string", "description": "op | command:CMD | none"},
+                    "otp_code": {"type": "string", "description": "current 2-step code for this login"},
+                    "trust_device": {"type": "boolean", "description": "store DSM's trusted-device token"},
+                    "tls": {"type": "string", "enum": ["pin", "verify"]},
+                    "allowed_network": {"type": "array", "items": {"type": "string"},
+                                        "description": "networks for the firewall/AutoBlock fixes, e.g. 192.168.0.0/24"},
+                    "stage_dir": {"type": "string", "description": "folder in a writable share for --deep / alert-deploy"},
+                    "webhook_file": {"type": "string"}}), WRITE,
+              lambda a: ["setup"] + [x for o in ([a["origin"]] if isinstance(a.get("origin"), str) else a.get("origin") or [])
+                                     for x in ("--origin", o)] + _opt(a, "user") + _opt(a, "password_source")
+              + _opt(a, "otp_source") + _opt(a, "otp_code") + _flag(a, "trust_device") + _opt(a, "tls")
+              + [x for n in a.get("allowed_network") or [] for x in ("--allowed-network", n)]
+              + _opt(a, "stage_dir") + _opt(a, "webhook_file")),
+    "doctor": ("Check config, credential source, origin reachability, TLS pin, login (one attempt), DSM version vs "
+               "advisories, 2-step verification, backend capabilities and NAS clock. Each check: {name, status, "
+               "detail, next_step}.", _obj(), READ, lambda a: ["doctor"]),
     "whoami": ("Sign in and show backend, origin, credential source, account, admin flag and DSM version.",
                _obj(), READ, lambda a: ["whoami"]),
     "status": ("Model, DSM version, uptime and the SA-26:13 verdict.", _obj(), READ, lambda a: ["status"]),
@@ -70,9 +93,10 @@ TOOLS = {
                              "failed_threshold": {"type": "integer", "minimum": 0}}), READ,
                        lambda a: ["incident"] + _flag(a, "probe") + _flag(a, "scan") + _flag(a, "deep") + _opt(a, "hours")
                        + _opt(a, "failed_threshold")),
-    "incident_fix": ("Hardening for the C3RB3R/.L0CK3D campaign. Without confirm: returns the plan (each change "
-                     "current -> new, the API calls, the DSM UI path) and sends no write. With confirm: true: "
-                     "applies it, reads every change back and audits again. Fix names: "
+    "incident_fix": ("Hardening for the C3RB3R/.L0CK3D campaign: the plan (each change current -> new, the API calls, "
+                     "the DSM UI path); with confirm: true (or a server started with --auto-confirm) it is applied, "
+                     "every change read back and the audit run again. force_firewall / force_admin / force apply "
+                     "changes whose checks do not pass (the check results stay in the notes). Fix names: "
                      + ", ".join(incident.FIX_ORDER) + ".",
                      _obj({"confirm": {"type": "boolean", "description": "true applies the plan"},
                            "only": dict(_LIST, description="fix names to include"),
@@ -81,8 +105,11 @@ TOOLS = {
                            "ransom_scan": {"type": "boolean", "description": "a clean scan allows snapshot fixes"},
                            "i_know_snapshots_may_rotate": {"type": "boolean"},
                            "upgrade": {"type": "boolean", "description": "install the newest DSM (reboots)"},
-                           "rotate_password": {"type": "boolean"}}), WRITE,
-                     lambda a: ["incident", "fix", "--yes" if a.get("confirm") else "--dry-run"]
+                           "rotate_password": {"type": "boolean"},
+                           "force_firewall": {"type": "boolean"}, "force_admin": {"type": "boolean"},
+                           "force": {"type": "boolean"}}), WRITE,
+                     lambda a: ["incident", "fix", "--yes" if a.get("confirm") or a.get("_auto") else "--dry-run"]
+                     + _flag(a, "force_firewall") + _flag(a, "force_admin") + _flag(a, "force")
                      + _csv(a, "only") + _csv(a, "skip") + [x for s in a.get("share") or [] for x in ("--share", s)]
                      + _flag(a, "ransom_scan") + _flag(a, "i_know_snapshots_may_rotate") + _flag(a, "upgrade")
                      + _flag(a, "rotate_password")),
@@ -92,7 +119,7 @@ TOOLS = {
                     lambda a: ["volume", "list"]),
     "tailscale_status": ("Tailscale package status, tailnet addresses and key expiry.", _obj(), READ,
                          lambda a: ["tailscale", "status"]),
-    "api_read": ("Call any DSM Web API read method (get/list/load/info/query/status...). Write methods are refused.",
+    "api_read": ("Call a DSM Web API read method (get, list, load, info, query, status, ...) and return its data.",
                  _obj({"api": {"type": "string", "description": "e.g. SYNO.Core.System"},
                        "method": {"type": "string", "description": "e.g. info"},
                        "params": {"type": "object", "description": "parameters; non-JSON strings are quoted"},
@@ -142,9 +169,10 @@ def _check_args(schema: dict, args) -> str | None:
 
 
 class Server:
-    def __init__(self, session_factory):
+    def __init__(self, session_factory, auto_confirm: bool = False):
         self.session_factory = session_factory
         self.session = None
+        self.auto_confirm = auto_confirm
 
     def _session(self):
         if self.session is None:
@@ -160,18 +188,29 @@ class Server:
             self.session = None
 
     def call_tool(self, name: str, args: dict) -> dict:
+        from . import onboard
         from .cli import COMMANDS, parse_args
-        argv = TOOLS[name][3](args)
+        argv = TOOLS[name][3](dict(args, _auto=self.auto_confirm))
         try:
             ns = parse_args(argv)
         except SystemExit:
             return self._error(f"invalid arguments for {name}", 2)
         if name == "api_read" and not commands.is_read_method(args["method"]):
-            return self._error(f"{args['method']!r} is not a read method; api_read only reads", 1)
-        fn = COMMANDS[ns.cmd][0]
+            return self._error(f"{args['method']!r} is a write method; api_read calls read methods "
+                               "(writes: nas api METHOD --allow-write)", 1)
         try:
             with contextlib.redirect_stdout(sys.stderr):  # stdout belongs to the protocol
-                result = fn(self._session(), ns)
+                if ns.cmd == "setup":
+                    ns.origin = ns.setup_origin
+                    result = onboard.setup(ns)
+                    self.close()
+                    if result[1].get("written"):
+                        config.load(result[1]["config"])  # the next tool uses what setup wrote
+                elif ns.cmd == "doctor":
+                    self.close()
+                    result = onboard.doctor(ns)
+                else:
+                    result = COMMANDS[ns.cmd][0](self._session(), ns)
         except NasError as e:
             if e.exit_code in (4, 5, 6, 7):
                 self.close()
@@ -224,10 +263,10 @@ def _rpc_error(mid, code: int, message: str) -> dict:
     return {"jsonrpc": "2.0", "id": mid, "error": {"code": code, "message": message}}
 
 
-def serve(infile, outfile, session_factory) -> int:
+def serve(infile, outfile, session_factory, auto_confirm: bool = False) -> int:
     """Answer requests from `infile` until EOF."""
     set_no_input(True)
-    server = Server(session_factory)
+    server = Server(session_factory, auto_confirm)
 
     def send(m):
         outfile.write(json.dumps(m, ensure_ascii=False) + "\n")

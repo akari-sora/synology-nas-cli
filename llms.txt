@@ -9,6 +9,7 @@
 
 ## Using it from an agent
 
+- [docs/AGENT-RUNBOOK.md](docs/AGENT-RUNBOOK.md): the step-by-step sequence (install, `nas setup`, `nas doctor`, audit, plan, fix) with exit codes, JSON and the values a person provides
 - [docs/MCP.md](docs/MCP.md): `nas mcp` tools, arguments, result format, client configuration
 - [docs/EXIT-CODES.md](docs/EXIT-CODES.md): exit codes (3 input required, 4 login failed, 5 AutoBlock, 6 unreachable, 7 certificate changed)
 - [schemas/](schemas/): JSON Schemas of `--json` output (incident, incident-fix, alert, status, health, whoami)

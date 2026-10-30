@@ -76,6 +76,7 @@ class Credentials:
         self.environ = os.environ if environ is None else environ
         self.platform = platform or sys.platform
         self._password = None  # set by a prompt or a rotation, kept for this process only
+        self.otp_once = None  # a 2FA code handed over for one login (nas setup --otp-code)
         self._source = None
         self._store_user = None
 
@@ -310,6 +311,9 @@ class Credentials:
         return self._password
 
     def otp(self) -> str | None:
+        if self.otp_once:
+            code, self.otp_once = self.otp_once, None
+            return code
         cmd = self.cfg.get("otp_command")
         if cmd:
             p = self.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
