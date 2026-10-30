@@ -17,6 +17,14 @@
     },
     "summary": {
       "$ref": "#/$defs/summary"
+    },
+    "deep": {
+      "type": "object",
+      "description": "raw result of the --deep root collector (log text as data)",
+      "required": [
+        "marker",
+        "version"
+      ]
     }
   },
   "$defs": {

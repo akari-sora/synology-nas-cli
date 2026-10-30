@@ -115,6 +115,12 @@ DEFAULTS = {
         # delivers every tailnet connection as 127.0.0.1, so one blocked tailnet device blocks all of them;
         # an SSH tunnel or local reverse proxy on the NAS looks the same.
         "autoblock_allow_loopback": False,
+        # Indicators of compromise used by `exploit_attempts` and `--deep` besides the built-in injection strings
+        # (PLUGIN_VALUE_END, LD_PRELOAD=, LD_DEBUG_OUTPUT): attacker addresses and extra strings to look for.
+        "ioc_ips": ["46.8.78.122", "104.253.175.125"],
+        "ioc_strings": [],
+        # `--deep` ioc_users: local accounts (uid >= 1024) you know; admin and guest are always known.
+        "allowed_users": [],
     },
 }
 

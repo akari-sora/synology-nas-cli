@@ -64,9 +64,11 @@ TOOLS = {
                        "per item with a hint. probe opens TCP connections to the public address; scan runs a "
                        "File Station search for ransom notes (minutes, creates temporary search tasks).",
                        _obj({"probe": {"type": "boolean"}, "scan": {"type": "boolean"},
+                             "deep": {"type": "boolean", "description": "indicators of compromise via a read-only "
+                                      "root script (temporary Task Scheduler task)"},
                              "hours": {"type": "integer", "minimum": 1},
                              "failed_threshold": {"type": "integer", "minimum": 0}}), READ,
-                       lambda a: ["incident"] + _flag(a, "probe") + _flag(a, "scan") + _opt(a, "hours")
+                       lambda a: ["incident"] + _flag(a, "probe") + _flag(a, "scan") + _flag(a, "deep") + _opt(a, "hours")
                        + _opt(a, "failed_threshold")),
     "incident_fix": ("Hardening for the C3RB3R/.L0CK3D campaign. Without confirm: returns the plan (each change "
                      "current -> new, the API calls, the DSM UI path) and sends no write. With confirm: true: "

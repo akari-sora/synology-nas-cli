@@ -17,7 +17,7 @@
 | `services` | - | `nas --json services` | no |
 | `logs` | `since` (string), `limit` (int), `top` (int) | `nas --json logs` | no |
 | `alert` | `window` (int), `failed_threshold` (int) | `nas --json alert --no-update` | no |
-| `incident_audit` | `probe` (bool), `scan` (bool), `hours` (int), `failed_threshold` (int) | `nas --json incident` | no (`scan` creates temporary File Station search tasks) |
+| `incident_audit` | `probe` (bool), `scan` (bool), `deep` (bool), `hours` (int), `failed_threshold` (int) | `nas --json incident` | no (`scan` creates temporary File Station search tasks; `deep` a temporary root task and one result file, both deleted) |
 | `incident_fix` | `confirm` (bool), `only` / `skip` (string or string array of fix names), `share` (string array), `ransom_scan`, `i_know_snapshots_may_rotate`, `upgrade`, `rotate_password` (bool) | `nas --json incident fix --dry-run`; with `confirm: true`: `... --yes` | only with `confirm: true` |
 | `pkg_list` | - | `nas --json pkg list` | no |
 | `volume_list` | - | `nas --json volume list` | no |

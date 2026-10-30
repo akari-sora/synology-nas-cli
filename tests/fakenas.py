@@ -169,7 +169,7 @@ class FakeSession:
 def args(**kw):
     a = dict(action=None, probe=False, scan=False, probe_timeout=1, scan_timeout=10, log_limit=1000, hours=24,
              failed_threshold=20, dry_run=False, yes=False, only=None, skip=None, share=None, upgrade=False,
-             rotate_password=False, ransom_scan=False)
+             rotate_password=False, ransom_scan=False, deep=False)
     a.update(kw)
     return types.SimpleNamespace(**a)
 

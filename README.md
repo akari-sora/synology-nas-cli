@@ -44,6 +44,8 @@ Read-only. Each item prints `PASS`, `WARN`, `FAIL` or `SKIP` with a one-line hin
 | `snapshot_schedule:<share>` | no snapshot schedule, schedule off, or no scheduled snapshot within `snapshot_max_age_hours` | creates a schedule where none exists (after a clean `--ransom-scan`) |
 | `snapshot_worm:<share>` | immutable-snapshot (WORM) lock on, on a model that does not support it: DSM accepts the setting and scheduled snapshots then silently stop | yes |
 | `ransomware_files` | `*.L0CK3D`, `*.LOCK3D` or `read-me3.txt` found in any share. Only with `--scan` (File Station search, minutes) | no (incident) |
+| `exploit_attempts` | the connection log contains the CVE-2024-10441 sign-in injection (`PLUGIN_VALUE_END`, `LD_PRELOAD=`, `LD_DEBUG_OUTPUT`) or entries from `incident.ioc_ips` (WARN: attempt seen) | no |
+| `exploit_attempts_logs`, `ioc_cron`, `ioc_binaries`, `ioc_users`, `ioc_ssh_keys`, `ioc_processes` | only with `--deep` (one read-only root script): injection blocks in `/var/log/synoplugin`, `synoscgi`, `auth` logs; planted cron files and download-and-run lines; known C3RB3R files; extra uid-0 or unknown accounts; `authorized_keys`; processes from temp folders or outside Synology paths, connections to IOC addresses. Details in [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md#indicators-of-compromise-and-how-nas-incident---deep-checks-them) | no (incident) |
 
 `SKIP` always says why: the item needs a flag (`--probe`, `--scan`), the API answered with an error, or the box does not have the feature (no Btrfs/Snapshot Replication, no router configured in DSM).
 
@@ -127,7 +129,7 @@ Example ([`config.example.json`](config.example.json), what `nas config init` wr
 | `webhook.*` | `""` | Where `alert-deploy` reads `{"url", "header"}`: `op_item` (`op://VAULT/ITEM`: website = URL, field `op_header_field` = header), `file` (JSON file), or `command` (prints that JSON). |
 | `deploy.*` | see `nas config show` | `root_dir` (`/volume1/@nas-alert`), `stage_dir` (a folder in a writable share), `task_name`, `install_task_name`, `interval_min` (10), `dsm_webhook_name`, `dsm_webhook_prefix`, `dsm_webhook_template` (`Warning`). |
 | `upgrade.lang`, `upgrade.cache_dir` | `enu`, `~/.cache/synology-nas-cli/pat` | PreCheck note language; where `.pat` files are kept. |
-| `incident.*` | `14`, `3`, `30`, `10`, `5`, `false` | `snapshot_retain_days` (only set on shares that have no retention policy), `snapshot_hour`, `snapshot_minute` for schedules `incident fix` creates; `autoblock_attempts`, `autoblock_within_mins` it sets; `autoblock_allow_loopback`: also allow-list `127.0.0.1` in AutoBlock (Tailscale's DSM package in userspace mode delivers every tailnet connection as `127.0.0.1`, so one blocked tailnet device would block all of them). |
+| `incident.*` | `14`, `3`, `30`, `10`, `5`, `false` | `snapshot_retain_days` (only set on shares that have no retention policy), `snapshot_hour`, `snapshot_minute` for schedules `incident fix` creates; `autoblock_attempts`, `autoblock_within_mins` it sets; `ioc_ips` (default `46.8.78.122`, `104.253.175.125`), `ioc_strings` (extra strings) for `exploit_attempts` and `--deep`; `allowed_users` (accounts `--deep` treats as known); `autoblock_allow_loopback`: also allow-list `127.0.0.1` in AutoBlock (Tailscale's DSM package in userspace mode delivers every tailnet connection as `127.0.0.1`, so one blocked tailnet device would block all of them). |
 
 Environment variables: `NAS_CONFIG`, `NAS_BACKEND`, `NAS_ORIGINS` (comma-separated; older name `NAS_LAN_ORIGIN`), `NAS_CHROME_ORIGINS` (older `NAS_ORIGIN`), `NAS_OP_ITEM` (`op://VAULT/ITEM`), `NAS_OP_TOKEN_FILE`, `NAS_USER`, `NAS_PASSWORD_COMMAND`, `NAS_PASSWORD`, `NAS_OTP_COMMAND`, `NAS_CREDENTIAL_SOURCE`, `NAS_SESSION_FILE`, `NAS_SID` + `NAS_SYNOTOKEN`, `OP_SERVICE_ACCOUNT_TOKEN`.
 
@@ -172,6 +174,7 @@ The `password` backend never uses `HTTP(S)_PROXY`, `ALL_PROXY` or the system pro
 nas incident                       # read-only audit
 nas incident --probe               # also test the public address from this machine
 nas incident --scan                # also search every share for ransom notes (minutes)
+nas incident --deep                # also indicators of compromise via one read-only root script (needs deploy.stage_dir)
 nas --json incident                # machine-readable
 
 nas incident fix --dry-run         # the plan: every change (current -> new), the API calls, the DSM UI path

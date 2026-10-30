@@ -25,7 +25,9 @@ want = {"dsm_version": "FAIL", "sa_26_14_packages": "FAIL", "firewall": "FAIL", 
         "autoblock": "WARN", "smb_min_protocol": "FAIL", "admin_account": "WARN",
         "snapshot_schedule:photos": "PASS", "snapshot_worm:photos": "FAIL",
         "snapshot_schedule:docs": "WARN", "snapshot_worm:docs": "PASS",
-        "snapshot_schedule:media": "WARN", "snapshot_worm:media": "PASS", "ransomware_files": "SKIP"}
+        "snapshot_schedule:media": "WARN", "snapshot_worm:media": "PASS", "ransomware_files": "SKIP",
+        "exploit_attempts": "PASS", "exploit_attempts_logs": "SKIP", "ioc_cron": "SKIP", "ioc_binaries": "SKIP",
+        "ioc_users": "SKIP", "ioc_ssh_keys": "SKIP", "ioc_processes": "SKIP"}
 assert got == want, {k: (got.get(k), v) for k, v in want.items() if got.get(k) != v}
 assert rc == 1 and data["summary"]["FAIL"] == 6
 assert all(is_read_method(m) for _, m in nas.sent), [m for _, m in nas.sent if not is_read_method(m)]

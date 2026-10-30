@@ -126,6 +126,10 @@ def build_parser() -> argparse.ArgumentParser:
             sp.add_argument("--probe", action="store_true", help="TCP-probe the public address from this machine")
             sp.add_argument("--probe-timeout", type=float, default=1.5, help="seconds per TCP connect")
             sp.add_argument("--scan", action="store_true", help="search every share for ransom notes (minutes)")
+            sp.add_argument("--deep", action="store_true",
+                            help="indicators of compromise: one read-only root script (temporary Task Scheduler "
+                                 "task, or directly with --backend local) checks logs, cron, files, users, SSH keys, "
+                                 "processes and outbound connections")
             sp.add_argument("--scan-timeout", type=int, default=3600, help="give up the scan after N seconds")
             sp.add_argument("--log-limit", type=int, default=10000, help="connection-log entries to read")
             sp.add_argument("--hours", type=int, default=24, help="window for the failed sign-in count")
