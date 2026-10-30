@@ -105,6 +105,15 @@ assert srcs == ["192.0.2.0/255.255.255.0", "100.64.0.0/255.192.0.0"], srcs
 assert "CGNAT" in c["note"] and "fd7a:115c:a1e0::/48" in c["note"] and "added" not in c["note"], c["note"]
 ab = next(x for x in incident.plan(s, f, args(only="autoblock")))
 assert ab["calls"][1]["params"]["ip"] == ["127.0.0.1", "192.0.2.0/255.255.255.0", "100.64.0.0/255.192.0.0"], ab["calls"]
+# an allow entry stored as a subnet is found through the list call (get alone would miss it)
+n2 = FakeNas()
+n2.st["ab_allow"] = {"192.0.2.0/255.255.255.0"}
+s2 = FakeSession(n2)
+abp = next(x for x in incident.plan(s2, incident.gather(s2, args()), args(only="autoblock")))
+assert abp["calls"][1]["params"]["ip"] == ["127.0.0.1", "100.64.0.0/255.192.0.0"], abp["calls"]
+n2.st["ab_list_broken"] = True  # list unreadable: get alone decides (it only knows single addresses)
+abp = next(x for x in incident.plan(s2, incident.gather(s2, args()), args(only="autoblock")))
+assert "192.0.2.0/255.255.255.0" in abp["calls"][1]["params"]["ip"] and not abp["refused"]
 _env.use_config({})
 assert incident.as_nas_api(incident.call("SYNO.Core.Security.Firewall.Profile.Apply", "status", 1, {"task_id": "x"})) \
     == "nas api SYNO.Core.Security.Firewall.Profile.Apply status --version 1 task_id=x"

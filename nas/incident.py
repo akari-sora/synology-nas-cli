@@ -949,12 +949,9 @@ def plan(s, f, args) -> list:
                 pass
         for net in v4:
             allow.append(str(net.network_address) if net.prefixlen == 32 else f"{net.network_address}/{net.netmask}")
-        have = []
-        for ip in allow:
-            d, _e = part("SYNO.Core.Security.AutoBlock.Rules", s.call("SYNO.Core.Security.AutoBlock.Rules", "get",
-                                                                     {"ip": ip}, version=1))
-            if (d or {}).get("type") == "allow":
-                have.append(ip)
+        # present = in the allow list (the UI grid's list call) or `get ip=` answers type allow;
+        # if list cannot be read, `get` alone decides (create with overwrite=true is idempotent)
+        have = [ip for ip in allow if _ab_allowed(s, ip, _ab_listed(s))]
         missing = [ip for ip in allow if ip not in have]
         calls = []
         if not ab.get("enable"):
@@ -967,8 +964,8 @@ def plan(s, f, args) -> list:
         if calls:
             def verify(s_, missing=missing):
                 d = need("SYNO.Core.Security.AutoBlock", s_.call("SYNO.Core.Security.AutoBlock", "get"))
-                bad = [ip for ip in missing if (part("SYNO.Core.Security.AutoBlock.Rules", s_.call(
-                    "SYNO.Core.Security.AutoBlock.Rules", "get", {"ip": ip}, version=1))[0] or {}).get("type") != "allow"]
+                listed = _ab_listed(s_)
+                bad = [ip for ip in missing if not _ab_allowed(s_, ip, listed)]
                 ok = bool(d.get("enable")) and not bad
                 return ok, (f"on, {d.get('attempts')} attempts / {d.get('within_mins')} min" if d.get("enable") else "off") + \
                     (f"; not on the allow list: {', '.join(bad)}" if bad else "")
@@ -976,7 +973,8 @@ def plan(s, f, args) -> list:
             after = (f"on, {inc['autoblock_attempts']} attempts / {inc['autoblock_within_mins']} min"
                      if not ab.get("enable") else "on") + (f"; allow {', '.join(missing)}" if missing else "")
             out.append(_change("autoblock", "AutoBlock", before, after, calls, verify=verify,
-                               note="allow-listed addresses are never blocked"))
+                               note="allow-listed addresses are never blocked; present entries are read from the "
+                                    "allow list (Rules list) and per address (Rules get)"))
 
     # built-in admin disabled. SYNO.Core.User set answers 105 from a password session (even after
     # PasswordConfirm); as root through synowebapi it works, so it runs in a one-off root task.
@@ -1052,6 +1050,22 @@ def plan(s, f, args) -> list:
     if unknown:
         raise NasError(f"unknown fix name(s): {', '.join(sorted(unknown))} (known: {', '.join(FIX_ORDER)})")
     return [c for c in out if (not only or c["fix"] in only) and c["fix"] not in skip]
+
+
+def _ab_listed(s) -> set:
+    """Entries of the AutoBlock allow list (the UI grid's call); empty when it cannot be read."""
+    d, _e = part("SYNO.Core.Security.AutoBlock.Rules", s.call(
+        "SYNO.Core.Security.AutoBlock.Rules", "list", {"type": "allow", "offset": 0, "limit": 1000}, version=1))
+    return {str(x.get("ip")) for x in ((d or {}).get("ip_info") or []) if isinstance(x, dict)}
+
+
+def _ab_allowed(s, ip: str, listed: set) -> bool:
+    """In the allow list, or `Rules get ip=` (the UI's single-address lookup) answers type allow."""
+    if ip in listed:
+        return True
+    d, _e = part("SYNO.Core.Security.AutoBlock.Rules", s.call("SYNO.Core.Security.AutoBlock.Rules", "get",
+                                                             {"ip": ip}, version=1))
+    return (d or {}).get("type") == "allow"
 
 
 def _new_password() -> str:

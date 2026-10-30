@@ -62,7 +62,10 @@ class FakeNas:
             ("SYNO.Core.QuickConnect", "get"): ok({"enabled": st["qc"], "server_alias": "example"}),
             ("SYNO.Core.QuickConnect.Upnp", "get"): ok({"enabled": st["qc_upnp"]}),
             ("SYNO.Core.Security.AutoBlock", "get"): ok({"enable": st["ab"], "attempts": 10, "within_mins": 5, "expire_day": 0}),
-            ("SYNO.Core.Security.AutoBlock.Rules", "get"): ok({"ip": p.get("ip"), "type": "allow" if isinstance(p.get("ip"), str) and p["ip"] in st["ab_allow"] else "none"}),
+            ("SYNO.Core.Security.AutoBlock.Rules", "list"): (
+                ok({"ip_info": [{"ip": ip} for ip in sorted(st["ab_allow"])], "total": len(st["ab_allow"])})
+                if p.get("type") == "allow" and not st.get("ab_list_broken") else err(103)),
+            ("SYNO.Core.Security.AutoBlock.Rules", "get"): ok({"ip": p.get("ip"), "type": "allow" if isinstance(p.get("ip"), str) and "/" not in p["ip"] and p["ip"] in st["ab_allow"] else "none"}),
             ("SYNO.Core.FileServ.SMB", "get"): ok({"enable_samba": True, "smb_min_protocol": st["smb_min"], "smb_max_protocol": 3}),
             ("SYNO.Core.User", "list"): ok({"users": [{"name": "admin", "expired": st["admin"]}, {"name": "ops", "expired": "normal"}]}),
             ("SYNO.Core.User", "get"): ok({"users": [{"name": "admin", "expired": st["admin"]}]}),
