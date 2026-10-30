@@ -1,14 +1,14 @@
 # synology-nas-cli
 
-> `nas`: a zero-dependency Python (stdlib, 3.8+) CLI and stdio MCP server for Synology DSM 7 NAS boxes: onboarding (`setup`, `doctor`), status, health, logs, packages, volumes, Tailscale, DSM upgrades, scheduled health alerts pushed to a webhook (`alert`, `alert-deploy`), and a read-only audit plus one-command remediation (`incident`, `incident fix`) for the 2026 C3RB3R / `.L0CK3D` ransomware campaign (Synology-SA-24:20, SA-26:13, SA-26:14). Not affiliated with Synology Inc.
+> `nas`: a zero-dependency Python (stdlib, 3.8+) CLI and stdio MCP server for Synology DSM 7 NAS boxes: onboarding (`setup`, `doctor`), status, health, logs, packages, volumes, Tailscale, DSM upgrades, scheduled health alerts pushed to a webhook (`alert`, `alert-deploy`), and a read-only audit plus one-command remediation (`incident`, `incident fix`), encryptor freeze (`incident contain`) and memory key recovery with c3rb3r-rescue (`incident rescue`) for the 2026 C3RB3R / `.L0CK3D` ransomware campaign (Synology-SA-24:20, SA-26:13, SA-26:14). Not affiliated with Synology Inc.
 
 ## Read first (for AI agents)
 
 1. [docs/AGENT-RUNBOOK.md](docs/AGENT-RUNBOOK.md): the step-by-step sequence an agent executes (`install` -> `nas setup` -> `nas doctor` -> `nas incident` -> `nas incident fix --dry-run` -> `nas incident fix --yes` -> optional `--deep` and `alert-deploy`), exit codes, JSON payloads, and the exact fields to ask a person once
 2. [README.md](README.md): full user and agent guide (English and 繁體中文), what `nas incident` checks and what `nas incident fix` changes, installation, environment setup table, configuration keys, credential chain, TLS pinning, and command summary
 3. [docs/EXIT-CODES.md](docs/EXIT-CODES.md): exit codes (`0` ok, `1` attention/failure, `2` usage/config, `3` input required, `4` login rejected, `5` AutoBlock 407, `6` unreachable/upgrading, `7` TLS certificate changed)
-4. [docs/MCP.md](docs/MCP.md): `nas mcp` stdio MCP server tools (`setup`, `doctor`, `whoami`, `status`, `health`, `net`, `services`, `logs`, `alert`, `incident_audit`, `incident_fix`, `pkg_list`, `volume_list`, `tailscale_status`, `api_read`) and client config
-5. [schemas/](schemas/): JSON Schemas for `--json` outputs (`incident.schema.json`, `incident-fix.schema.json`, `alert.schema.json`, `status.schema.json`, `health.schema.json`, `whoami.schema.json`)
+4. [docs/MCP.md](docs/MCP.md): `nas mcp` stdio MCP server tools (`setup`, `doctor`, `whoami`, `status`, `health`, `net`, `services`, `logs`, `alert`, `incident_audit`, `incident_fix`, `pkg_list`, `volume_list`, `tailscale_status`, `api_read`), `confirm` / `--auto-confirm` semantics (`NAS_YES` does not apply), and client config
+5. [schemas/](schemas/): JSON Schemas for `--json` outputs (`incident.schema.json`, `incident-fix.schema.json`, `incident-contain.schema.json`, `incident-rescue.schema.json`, `alert.schema.json`, `status.schema.json`, `health.schema.json`, `whoami.schema.json`)
 
 ## Skills
 

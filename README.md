@@ -175,7 +175,7 @@ Example ([`config.example.json`](config.example.json), what `nas config init` wr
 | Key | Default | Meaning |
 |---|---|---|
 | `name` | `nas` | Label in webhook bodies and the DSM notification prefix (`[name]`). |
-| `assume_yes` | `false` | Accept every confirmation (same as `--yes` / `NAS_YES=1`). |
+| `assume_yes` | `false` | Accept every confirmation (same as `--yes` / `NAS_YES=1`; what that turns on: [What changes the NAS](#what-changes-the-nas)). The MCP server does not read it. |
 | `origins` | `[]` | DSM URLs for `--backend password`, tried in order; the first that accepts a TCP connection (3 s) is used. Put the LAN address first, then a VPN/Tailscale one. |
 | `chrome_origins` | = `origins` | Which Chrome tab `--backend chrome` may use. |
 | `connect_timeout` | `3.0` | Seconds for the TCP reachability check. |
@@ -196,7 +196,7 @@ Example ([`config.example.json`](config.example.json), what `nas config init` wr
 | `webhook.*` | `""` | Where `alert-deploy` reads `{"url", "header"}`: `op_item` (`op://VAULT/ITEM`: website = URL, field `op_header_field` = header), `file` (JSON file), or `command` (prints that JSON). |
 | `deploy.*` | see `nas config show` | `root_dir` (`/volume1/@nas-alert`), `stage_dir` (a folder in a writable share), `task_name`, `install_task_name`, `interval_min` (10), `dsm_webhook_name`, `dsm_webhook_prefix`, `dsm_webhook_template` (`Warning`). |
 | `upgrade.lang`, `upgrade.cache_dir` | `enu`, `~/.cache/synology-nas-cli/pat` | PreCheck note language; where `.pat` files are kept. |
-| `incident.*` | `14`, `3`, `30`, `10`, `5`, `false` | `snapshot_retain_days` (only set on shares that have no retention policy), `snapshot_hour`, `snapshot_minute` for schedules `incident fix` creates; `autoblock_attempts`, `autoblock_within_mins` it sets; `ioc_ips` (default `46.8.78.122`, `104.253.175.125`), `ioc_strings` (extra strings) for `exploit_attempts` and `--deep`; `allowed_users` (accounts `--deep` treats as known); `autoblock_allow_loopback`: also allow-list `127.0.0.1` in AutoBlock (Tailscale's DSM package in userspace mode delivers every tailnet connection as `127.0.0.1`, so one blocked tailnet device would block all of them). |
+| `incident.*` | `14`, `3`, `30`, `10`, `5`, `false` | `snapshot_retain_days` (only set on shares that have no retention policy), `snapshot_hour`, `snapshot_minute` for schedules `incident fix` creates; `autoblock_attempts`, `autoblock_within_mins` it sets; `ioc_ips` (default `46.8.78.122` from public reports and `104.253.175.125`, observed in the wild on 2026-10-28), `ioc_strings` (extra strings) for `exploit_attempts` and `--deep`; `allowed_users` (accounts `--deep` treats as known); `autoblock_allow_loopback`: also allow-list `127.0.0.1` in AutoBlock (Tailscale's DSM package in userspace mode delivers every tailnet connection as `127.0.0.1`, so one blocked tailnet device would block all of them). |
 
 Environment variables: `NAS_CONFIG`, `NAS_BACKEND`, `NAS_YES`, `NAS_NO_INPUT`, `NAS_ORIGINS` (comma-separated; older name `NAS_LAN_ORIGIN`), `NAS_CHROME_ORIGINS` (older `NAS_ORIGIN`), `NAS_OP_ITEM` (`op://VAULT/ITEM`), `NAS_OP_TOKEN_FILE`, `NAS_USER`, `NAS_PASSWORD_COMMAND`, `NAS_PASSWORD`, `NAS_OTP_COMMAND`, `NAS_CREDENTIAL_SOURCE`, `NAS_SESSION_FILE`, `NAS_SID` + `NAS_SYNOTOKEN`, `OP_SERVICE_ACCOUNT_TOKEN`.
 
@@ -252,14 +252,36 @@ nas incident fix --skip admin_account
 nas incident fix --ransom-scan --yes          # a clean scan also allows the snapshot fixes
 nas incident fix --upgrade --rotate-password --yes   # opt-in extras
 
-nas incident contain                       # list processes that look like an encryptor (read-only)
+nas incident contain                       # list processes that look like an encryptor (signals nothing without --yes / NAS_YES=1)
 nas incident contain --yes                 # SIGSTOP them (all threads) so their memory and keys stay intact
-nas incident contain --yes --stop-sync     # also pause Cloud Sync, Hyper Backup and Container Manager
+nas incident contain --yes --stop-sync     # also stop Cloud Sync, Synology Drive, Hyper Backup, Container Manager
 nas incident contain --yes --save-exe /volumeUSB1/usbshare/evidence   # copy each executable (sha256 recorded)
-nas incident contain --release             # SIGCONT the frozen PIDs and restart what --stop-sync paused
+nas incident contain --release             # SIGCONT the frozen PIDs and start the packages --stop-sync stopped
+
+nas incident rescue --yes --capture-dir /usbshare1/rescue                  # freeze, capture memory, recover key candidates
+nas incident rescue --yes --capture-dir /usbshare1/rescue --sample /share/a.pdf.L0CK3D   # test each candidate on a copy
+nas incident rescue --yes --capture-dir /usbshare1/rescue --decrypt-from /share/docs --decrypt-to /Volumes/USB/out
 ```
 
-While files are being encrypted, `nas incident contain --yes` is the first command: it freezes the encryptor (`SIGSTOP`, never killed) so the session keys stay in its memory, then prints the next steps. Memory capture and key recovery from the frozen process: [soimy/c3rb3r-rescue](https://github.com/soimy/c3rb3r-rescue).
+While files are being encrypted, `nas incident contain --yes` is the first command: it freezes the encryptor (`SIGSTOP`, never killed) so the session keys stay in its memory, then prints the next steps.
+
+- Candidates: known names (`libgld`, `qnetd`, `xdy5*`, `incident.ioc_process_names`), executables in `/tmp`, `/var/tmp`, `/dev/shm`, `/volume*/@tmp`, processes with `*.L0CK3D` / `read-me3.txt` files open for writing, and high CPU outside Synology paths (containers excluded). A process whose executable is under a Synology path (`/usr/syno`, `/var/packages`, `/bin`, ...) needs a reason besides the open files; the scan lists it under `skipped` with the `--pid` that adds it. PID 1, kernel threads and the scanning script with its parents are never signalled, also with `--pid`.
+- The freeze signals exactly the processes the scan listed: same PID, start time (`/proc/PID/stat` field 22) and executable; a PID reused in between is reported and skipped.
+- `--stop-sync`: after the freeze, each of the packages Cloud Sync, Synology Drive, Hyper Backup and Container Manager (or Docker) that is running is stopped with `SYNO.Core.Package.Control stop`. Stopping Container Manager stops every container. The IDs it stopped are recorded in `contain-packages.json` next to the session cache on this computer.
+- `--release`: `SIGCONT` to the PIDs recorded on the NAS (`incident.contain_state_file`) and any `--pid`, then `SYNO.Core.Package.Control start` for each recorded package; the record is deleted once every package started. It starts packages, not single containers: a container comes back when its restart policy (auto-restart in Container Manager) starts it with the package.
+
+`nas incident rescue` does the memory capture and key recovery with [soimy/c3rb3r-rescue](https://github.com/soimy/c3rb3r-rescue), fetched at run time at the commit in `incident.rescue_commit`:
+
+1. `contain`: the freeze above (`--no-contain` skips it).
+2. `toolkit`: clones the toolkit and checks the commit (or uses `--rescue-dir`).
+3. `capture`: as root on the NAS (temporary Task Scheduler task, or directly with `--backend local`), the toolkit's `capture_process_memory.py inspect` and `capture` for each frozen PID into a new case folder under `--capture-dir`. That folder has to be on a USB disk or another volume than the affected data (`--force` for the same volume).
+4. `pull`: downloads the capture to the workdir on this computer (`--keep-on-nas` stops after the capture).
+5. `venv`: a venv with the toolkit's pinned requirements (Python `incident.rescue_min_python`, 3.11, or `--python`) and its self-tests.
+6. `keys`: `recover_process_key.py` on each capture; candidates are files with mode 400, never printed.
+7. `sample` (`--sample NAS_FILE [--expected-sha256 HEX]`): copies the file and tries each candidate on the copy.
+8. `decrypt` (`--decrypt-from NAS_FOLDER --decrypt-to DIR`): decrypts copies with the verified candidate.
+
+Each step is recorded in `<workdir>/state.json` (`--workdir`, default `~/.local/share/synology-nas-cli/rescue/<time>`); the same command continues where it stopped. On the NAS it writes only the capture folder. JSON: [`schemas/incident-rescue.schema.json`](schemas/incident-rescue.schema.json).
 
 If the audit shows `ransomware_files FAIL` or `external_signins FAIL` you are past hardening: follow [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md) (isolate first, keep evidence, restore from snapshots).
 
@@ -297,6 +319,8 @@ Order: `snapshot_worm` -> `snapshots` -> `packages` -> `smb_min_protocol` -> `qu
 claude mcp add synology-nas --scope user -- /path/to/synology-nas-cli/bin/nas mcp
 claude mcp add synology-nas --scope user -- /path/to/synology-nas-cli/bin/nas mcp --auto-confirm
 ```
+
+`incident_fix` applies its plan when a call has `confirm: true`, or has no `confirm` on a server started with `--auto-confirm`; `confirm: false` is always a dry run. `NAS_YES` and `assume_yes` do not change MCP calls. The `setup` tool takes `op:`, `keychain` and `env` credential sources; `command:` sources are set with `nas setup` on the command line. Fields such as `user`, `descr`, log `text`, `cmdline` and file names carry text chosen by whoever sends sign-ins to the NAS or runs processes on it.
 
 Full tool list, schemas and configuration for Claude Code, Claude Desktop, Cursor and Codex: [`docs/MCP.md`](docs/MCP.md).
 
@@ -355,7 +379,7 @@ nas trust | nas trust --reset https://HOST:PORT                # TLS certificate
 nas api SYNO.Core.System info --version 1                     # any DSM API; writes need --allow-write
 nas --json <command>                                          # JSON output for everything
 nas --no-input <command>                                      # prompts answer with exit 3 (also NAS_NO_INPUT=1; automatic without a terminal)
-nas --yes <command>                                           # accept every confirmation (also NAS_YES=1, config assume_yes)
+nas --yes <command>                                           # accept every confirmation (also NAS_YES=1, config assume_yes; see "What changes the NAS")
 nas --force incident fix --yes                                # apply changes whose checks do not pass (--force-firewall, --force-admin, snapshot rotation, reinstall)
 nas mcp [--auto-confirm]                                      # MCP server on stdio (docs/MCP.md)
 ```
@@ -370,12 +394,13 @@ nas mcp [--auto-confirm]                                      # MCP server on st
 - [`docs/ALERTS.md`](docs/ALERTS.md) — Alert codes, webhook payload, receivers, and deployment (`alert-deploy`, manual DSM task, cron/launchd).
 - [`docs/DSM-API-NOTES.md`](docs/DSM-API-NOTES.md) — DSM 7 Web API quirks and parameter encoding rules relied on by `nas`.
 - [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md) — CLI and MCP `_meta.exit_code` definitions (`0`–`7`, `130`).
-- [`schemas/`](schemas/) — JSON Schemas for `incident`, `incident-fix`, `alert`, `status`, `health`, and `whoami`.
+- [`schemas/`](schemas/) — JSON Schemas for `incident`, `incident-fix`, `incident-contain`, `incident-rescue`, `alert`, `status`, `health`, and `whoami`.
 - [`llms.txt`](llms.txt) — Entry-point index for LLM agents.
 
 ## What changes the NAS
 
-- Commands that change the NAS: `incident fix` (asks, or `--yes`), `upgrade` (without `--yes` it still uploads the `.pat` and runs PreCheck, then deletes the upload; `--yes` installs), `pkg start|stop|install|uninstall|default-volume VOL`, `volume atime`, `tailscale login-url`, `alert-deploy`, `login --save` / `logout --forget` (local keychain only), `trust --reset` (local file), and `api` with `--allow-write`. `ransom-scan`, `incident --scan` and `incident fix --ransom-scan` create temporary File Station search tasks on the NAS (stopped and cleaned afterwards). `nas api` sends methods that are not reads with `--allow-write`, `--yes` or `NAS_YES=1`.
+- Commands that change the NAS: `incident fix` (asks, or `--yes`), `incident contain` (`SIGSTOP` with `--yes`; `--stop-sync` stops packages; `--release`), `incident rescue` (asks, or `--yes`: freeze, temporary root tasks, the capture folder), `upgrade` (without `--yes` it still uploads the `.pat` and runs PreCheck, then deletes the upload; `--yes` installs), `pkg start|stop|install|uninstall|default-volume VOL`, `volume atime`, `tailscale login-url`, `alert-deploy`, `login --save` / `logout --forget` (local keychain only), `trust --reset` (local file), and `api` with `--allow-write`. `ransom-scan`, `incident --scan` and `incident fix --ransom-scan` create temporary File Station search tasks on the NAS (stopped and cleaned afterwards). `nas api` sends methods that are not reads with `--allow-write`, `--yes` or `NAS_YES=1`.
+- `--yes`, `NAS_YES=1` and config `assume_yes: true` answer every confirmation of the CLI: `incident fix` applies its plan (with `--upgrade` it installs DSM and the NAS reboots, a PreCheck with notes included; with `--rotate-password` it changes the password); `upgrade` installs after PreCheck and the NAS reboots; `incident contain` freezes the candidates (and with `--stop-sync` stops the packages); `incident rescue` runs its steps; `api` sends write methods as with `--allow-write`. `nas mcp` takes its answer from each call's `confirm` and from `--auto-confirm`, not from these.
 - `incident fix --dry-run` prints every write call it would send. The plan always shows current -> new values.
 - Passwords, SIDs and SynoTokens are never printed. `nas api` prints raw DSM output, which can include serial numbers and account names; the other commands filter those.
 - Each password sign-in that fails counts toward AutoBlock; the CLI reports a failed sign-in once and stops.
@@ -441,12 +466,12 @@ tests/smoke_live.sh       # optional: read-only commands against your NAS (uses 
 | `exploit_attempts` | 掃描連線紀錄是否有 CVE-2024-10441 登入注入字串（`PLUGIN_VALUE_END`、`LD_PRELOAD=`、`LD_DEBUG_OUTPUT`）或 `incident.ioc_ips` | 不自動修改（可進一步執行 `--deep` 確認是否成功植入） |
 | `exploit_attempts_logs`、`ioc_cron`、`ioc_binaries`、`ioc_users`、`ioc_ssh_keys`、`ioc_processes` | 搭配 `--deep`：執行唯讀 root 收集器檢查 `/var/log/synoplugin.log*`、`synoscgi.log*`、`auth.log*`、`/etc/cron.d/synot*`、`/bin/libgld`、`/bin/qnetd`、`/bin/l0ck.enc`、異常帳號、`authorized_keys` 與 `/proc` 程序／外部連線 | 不自動修改（若為 `FAIL` 請依 [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md) 進行事件應變） |
 
-### 正在被加密時：`nas incident contain`
+### 正在被加密時：`nas incident contain`、`nas incident rescue`
 
-- `nas incident contain`：列出疑似加密程式的程序（`libgld`、`qnetd`、從暫存資料夾執行的程式、開著 `*.L0CK3D` 或 `read-me3.txt` 的程序）。
-- `nas incident contain --yes --stop-sync`：對它們送 `SIGSTOP`（所有執行緒，逐一確認狀態為 `T`），讓金鑰留在記憶體裡；同時暫停 Cloud Sync、Hyper Backup 和 Container Manager。
-- `--save-exe DIR` 另存執行檔與 sha256；`nas incident contain --release` 讓它們繼續並重新啟動暫停的套件。
-- 接著用 [soimy/c3rb3r-rescue](https://github.com/soimy/c3rb3r-rescue) 擷取記憶體、找金鑰、在副本上解密。
+- `nas incident contain`：列出疑似加密程式的程序（`libgld`、`qnetd`、從暫存資料夾執行的程式、以寫入模式開著 `*.L0CK3D` 或 `read-me3.txt` 的程序）。沒加 `--yes`／`NAS_YES=1` 時不送任何訊號。執行檔在 Synology 路徑下的程序，除了開著的檔案之外還需要另一個理由才會列入（列在 `skipped`，附上加入用的 `--pid`）。PID 1、核心執行緒、掃描腳本本身與其上層程序一律不送訊號（`--pid` 也一樣）。
+- `nas incident contain --yes --stop-sync`：對掃描列出的程序（PID、啟動時間、執行檔都相同者）送 `SIGSTOP`（所有執行緒，逐一確認狀態為 `T`），讓金鑰留在記憶體裡；同時停止執行中的 Cloud Sync、Synology Drive、Hyper Backup 和 Container Manager 套件（停止 Container Manager 會停止所有容器），停掉的套件記錄在本機工作階段快取旁的 `contain-packages.json`。
+- `--save-exe DIR` 另存執行檔與 sha256；`nas incident contain --release` 對記錄的 PID 送 `SIGCONT`，並啟動 `--stop-sync` 停掉的套件（容器依各自的重新啟動原則回來）。
+- `nas incident rescue --yes --capture-dir /usbshare1/rescue`：用 [soimy/c3rb3r-rescue](https://github.com/soimy/c3rb3r-rescue)（執行時依 `incident.rescue_commit` 下載）一路做完：凍結 → 取得工具並核對 commit → 在 NAS 上以 root 對每個凍結的 PID 執行 `capture_process_memory.py`，寫到 `--capture-dir` 底下的新資料夾（須在 USB 硬碟或與受害資料不同的磁碟區，同一磁碟區要加 `--force`）→ 下載到本機 → 建 venv、安裝固定版本套件並跑自我測試 → `recover_process_key.py` 找出金鑰候選（檔案權限 400，不會印出）。`--sample 檔案` 在副本上逐一試候選金鑰，`--decrypt-from 資料夾 --decrypt-to 目錄` 解密副本。每一步記錄在工作目錄的 `state.json`，同一個指令再跑一次會從中斷處繼續。
 
 ### 安裝與環境設定
 

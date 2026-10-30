@@ -119,6 +119,7 @@ DEFAULTS = {
         "autoblock_allow_loopback": False,
         # Indicators of compromise used by `exploit_attempts` and `--deep` besides the built-in injection strings
         # (PLUGIN_VALUE_END, LD_PRELOAD=, LD_DEBUG_OUTPUT): attacker addresses and extra strings to look for.
+        # 46.8.78.122: payload host in public reports; 104.253.175.125: observed in the wild on 2026-10-28.
         "ioc_ips": ["46.8.78.122", "104.253.175.125"],
         "ioc_strings": [],
         # `--deep` ioc_users: local accounts (uid >= 1024) you know; admin and guest are always known.

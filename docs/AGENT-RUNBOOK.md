@@ -1,6 +1,6 @@
 # Agent runbook
 
-The sequence an agent follows from a fresh machine to an audited, hardened and monitored Synology NAS. Every command takes `--json` (anywhere on the line) and `--no-input` (prompts answer with exit code 3 instead of waiting). Exit codes: [EXIT-CODES.md](EXIT-CODES.md). Output schemas: [`schemas/`](../schemas/). Troubleshooting: [TROUBLESHOOTING.md](TROUBLESHOOTING.md). Hardening reference: [HARDENING.md](HARDENING.md). The same steps exist as MCP tools ([MCP.md](MCP.md)): `setup`, `doctor`, `incident_audit`, `incident_fix`.
+The sequence an agent follows from a fresh machine to an audited, hardened and monitored Synology NAS. Every command takes `--json` (anywhere on the line) and `--no-input` (prompts answer with exit code 3 instead of waiting). Exit codes: [EXIT-CODES.md](EXIT-CODES.md). Output schemas: [`schemas/`](../schemas/). Troubleshooting: [TROUBLESHOOTING.md](TROUBLESHOOTING.md). Hardening reference: [HARDENING.md](HARDENING.md). The same steps exist as MCP tools ([MCP.md](MCP.md)): `setup` (credential sources `op:`, `keychain`, `env`; `command:` through `nas setup` on the command line), `doctor`, `incident_audit`, `incident_fix` (`confirm: true` applies, `confirm: false` is a dry run, no `confirm` applies only on a server started with `--auto-confirm`).
 
 ## Step 0: install
 
@@ -72,7 +72,7 @@ nas incident fix --dry-run --json --ransom-scan        # the plan; --ransom-scan
 nas incident fix --yes --json --ransom-scan [--force-firewall] [--force-admin] [--upgrade] [--rotate-password]
 ```
 
-`{"before", "plan", "results": [{"fix", "target", "ok", "now"}], "after": [...]}`; exit 0 when every change was applied and read back and no FAIL is left. `--upgrade` installs the newest DSM (the NAS reboots, DSM answers exit 6 until it is back; `nas upgrade --wait-only` waits for completion). `--rotate-password` writes a new random password to the 1Password item or keychain entry and changes it in DSM. `NAS_YES=1` or `assume_yes: true` in the config is the same as `--yes` for every command; `nas mcp --auto-confirm` the same for the MCP tools.
+`{"before", "plan", "results": [{"fix", "target", "ok", "now"}], "after": [...]}`; exit 0 when every change was applied and read back and no FAIL is left. `--upgrade` installs the newest DSM (the NAS reboots, DSM answers exit 6 until it is back; `nas upgrade --wait-only` waits for completion). `--rotate-password` writes a new random password to the 1Password item or keychain entry and changes it in DSM. `NAS_YES=1` or `assume_yes: true` in the config is the same as `--yes` for every CLI command, which turns on: `incident fix` applying its plan (with `--upgrade`: DSM install and reboot, PreCheck notes included; with `--rotate-password`: the new password), `upgrade` installing (reboot), `incident contain` freezing the candidates (and stopping packages with `--stop-sync`), `incident rescue` running its steps, and `api` write methods (as `--allow-write`). The MCP server ignores both; it applies `incident_fix` on `confirm: true`, or without `confirm` when started with `--auto-confirm`.
 
 If the firewall result is `ok: false`, its `now` text lists the ways back in: another computer on the NAS's LAN, Synology Assistant / find.synology.com, a Tailscale device (userspace mode reaches DSM as 127.0.0.1), or the RESET button (mode 1) at the NAS (a physical step for the human; see [TROUBLESHOOTING.md](TROUBLESHOOTING.md)).
 
@@ -87,11 +87,21 @@ Adds `exploit_attempts_logs`, `ioc_cron`, `ioc_binaries`, `ioc_users`, `ioc_ssh_
 ## If files are being encrypted right now
 
 ```bash
-nas incident contain --json                         # candidates (read-only)
-nas incident contain --yes --stop-sync --json       # freeze them, pause sync/backup/containers
+nas incident contain --json                         # candidates; signals nothing without --yes / NAS_YES=1
+nas incident contain --yes --stop-sync --json       # freeze them; stop sync, backup and container packages
+nas incident rescue --yes --capture-dir /SHARE/rescue --json   # freeze, capture memory, recover key candidates
 ```
 
-Exit 0 with `frozen` listing each PID and thread states (`T` = stopped; `D` = waiting on I/O, check again with the command in `next_steps`). Then: keep the NAS powered on, capture each frozen process's memory with https://github.com/soimy/c3rb3r-rescue (its `skills/dsm-ransomware-rescue` skill), copy the executables (`--save-exe DIR`), run Step 6, and `nas incident contain --release` when done.
+`incident contain`:
+
+- `candidates` with `reasons`; `skipped` lists processes left out with the reason (a Synology-path executable whose only link is the ransom files: add it with `--pid N`; PID 1, kernel threads, the scanning script and its parents are never signalled, also with `--pid`).
+- With `--yes`: exit 0 with `frozen` listing each PID and thread states (`T` = stopped; `D` = waiting on I/O, check again with the command in `next_steps`). Only PIDs whose start time and executable still match the scan are signalled.
+- `--stop-sync` stops the running Cloud Sync, Synology Drive, Hyper Backup and Container Manager (or Docker) packages; stopping Container Manager stops every container. `paused` lists them; the IDs are recorded on this computer for `--release`.
+- `nas incident contain --release` sends `SIGCONT` to the recorded PIDs and starts the recorded packages (containers come back per their restart policy).
+
+`incident rescue` runs the [c3rb3r-rescue](https://github.com/soimy/c3rb3r-rescue) steps in order and records each in `<workdir>/state.json`: `contain`, `toolkit` (clone at `incident.rescue_commit`, commit checked), `capture` (as root, `capture_process_memory.py` per frozen PID into a new folder under `--capture-dir`, which has to be on a USB disk or another volume than the affected data; `--force` for the same volume), `pull` (download; `--keep-on-nas` stops here), `venv` (pinned requirements, self-tests; Python 3.11+ or `--python`), `keys` (`recover_process_key.py`; candidate files mode 400, never printed), `sample` (`--sample NAS_FILE`, each candidate on a copy), `decrypt` (`--decrypt-from NAS_FOLDER --decrypt-to DIR`, copies). Exit 3 lists what is missing (`--capture-dir`, `--decrypt-to`, `--yes`); running the same command again continues where it stopped. Schema: [`schemas/incident-rescue.schema.json`](../schemas/incident-rescue.schema.json).
+
+Afterwards: keep the NAS powered on until the capture is done, copy the executables (`--save-exe DIR`), run Step 6, and `nas incident contain --release` when done.
 
 ## Step 7 (optional): monitoring
 

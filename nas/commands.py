@@ -18,6 +18,7 @@ import urllib.parse
 
 from . import advisories, config
 from .backends import NasError, describe_error
+from .ioc import clean
 
 _SECRET_KEY = re.compile(r"(passwd|password|username|serial|token|^sid$|secret|private_key)", re.I)
 
@@ -650,15 +651,16 @@ def logs(s, args):
         f"Connection log: {len(items)} entries fetched of {total} in the log"
         + (f", since {since}" if since else "") + (f", span {times[0]} → {times[-1]}" if times else ""),
         f"Failed sign-ins: {data['failed']} from {len(fails_ip)} distinct IPs",
-        "  top users: " + ", ".join(f"{u} {n}" for u, n in data["failed_by_user"]),
-        "  top IPs:   " + ", ".join(f"{i} {n}" for i, n in data["failed_by_ip"]),
+        "  top users: " + ", ".join(f"{clean(u, 80)} {n}" for u, n in data["failed_by_user"]),
+        "  top IPs:   " + ", ".join(f"{clean(i, 60)} {n}" for i, n in data["failed_by_ip"]),
         "Successful sign-ins from non-LAN IPs:" + ("" if ok_ext else " none"),
     ]
     for e in data["external_success"]:
-        lines.append(f"  {e['last']}  {e['user']} from {e['ip']} via {e['via']}  ×{e['count']}")
+        lines.append(f"  {clean(e['last'], 30)}  {clean(e['user'], 80)} from {clean(e['ip'], 60)} "
+                     f"via {clean(e['via'], 30)}  ×{e['count']}")
     lines.append("Entry kinds:")
     for k, n in data["kinds"]:
-        lines.append(f"  {n:>6}  {k[:110]}")
+        lines.append(f"  {n:>6}  {clean(k, 110)}")
     return lines, data
 
 

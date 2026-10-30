@@ -44,13 +44,19 @@ COMMANDS = {
 EPILOGS = {
     "incident": """contain (first response while files are being encrypted):
   nas incident contain                 list candidate encryptor processes (known names, executables in
-                                       /tmp, /dev/shm, /volume*/@tmp, open *.L0CK3D / read-me3.txt files,
-                                       high CPU outside Synology paths, incident.ioc_process_names)
-  nas incident contain --yes           SIGSTOP each candidate and verify every thread is stopped (T); D =
+                                       /tmp, /dev/shm, /volume*/@tmp, *.L0CK3D / read-me3.txt files open
+                                       for writing, high CPU outside Synology paths,
+                                       incident.ioc_process_names). Executables under Synology paths need
+                                       a reason besides the open files. PID 1, kernel threads and the
+                                       scanning script with its parents are never signalled.
+  nas incident contain --yes           SIGSTOP each candidate whose start time and executable still
+                                       match the scan; verify every thread is stopped (T); D =
                                        waiting on I/O, check again. Memory and keys stay in place for a
                                        memory capture (https://github.com/soimy/c3rb3r-rescue)
-  --pid N (repeatable)                 add explicit PIDs
-  --stop-sync                          also stop Cloud Sync, Hyper Backup, Container Manager (recorded)
+  --pid N (repeatable)                 add explicit PIDs (same exclusions; a note for Synology paths)
+  --stop-sync                          also stop the running Cloud Sync, Synology Drive, Hyper Backup and
+                                       Container Manager packages (every container stops with Container
+                                       Manager); the stopped ones are recorded for --release
   --save-exe DIR                       copy each candidate's executable into DIR on the NAS (root-only, 700)
   --release                            SIGCONT the PIDs the last freeze recorded; start paused packages
 Runs as root through a temporary Task Scheduler task (--backend password, needs deploy.stage_dir) or
@@ -175,7 +181,9 @@ def build_parser() -> argparse.ArgumentParser:
             c.add_argument("--release", action="store_true", help="SIGCONT the PIDs of the last freeze; restart "
                                                                    "packages paused with --stop-sync")
             c.add_argument("--stop-sync", action="store_true",
-                           help="also stop Cloud Sync, Hyper Backup and Container Manager (restarted by --release)")
+                           help="also stop the running Cloud Sync, Synology Drive, Hyper Backup and Container Manager "
+                                "packages (every container stops with Container Manager); --release starts the "
+                                "packages it stopped")
             c.add_argument("--save-exe", metavar="DIR", help="copy each candidate's executable into DIR on the NAS "
                                                              "(created root-only, mode 700)")
             c.add_argument("--cpu-threshold", type=float, default=50.0,
@@ -246,7 +254,8 @@ def build_parser() -> argparse.ArgumentParser:
                                                              "~/.config/synology-nas-cli/config.json)")
         if name == "mcp":
             sp.add_argument("--auto-confirm", action="store_true",
-                            help="write tools apply directly (also NAS_YES=1 or config assume_yes)")
+                            help="incident_fix applies the plan when a call has no confirm argument "
+                                 "(confirm: false stays a dry run; NAS_YES and assume_yes do not apply to MCP)")
         if name == "trust":
             sp.add_argument("--reset", metavar="ORIGIN",
                             help="forget the certificate trusted for ORIGIN (e.g. https://192.0.2.10:5001); "
@@ -395,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "mcp":
         from .mcp import serve
         return serve(sys.stdin, sys.stdout, lambda: open_session(args.backend, origins, lan, renew=True),
-                     auto_confirm=args.auto_confirm or args.assume_yes)
+                     auto_confirm=args.auto_confirm)
     if args.cmd in NO_SESSION:
         try:
             if args.cmd == "config":

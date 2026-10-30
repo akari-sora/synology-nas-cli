@@ -155,10 +155,29 @@ assert rpc("resources/list")["error"]["code"] == -32601
 send("{not json")
 assert json.loads(client_in.readline())["error"]["code"] == -32700
 
-# --auto-confirm: incident_fix applies without confirm
+# --auto-confirm: incident_fix applies without confirm; confirm: false stays a dry run (also with NAS_YES=1)
 auto = mcp.Server(factory, auto_confirm=True)
 res = json.loads(auto.call_tool("incident_fix", {"only": "smb_min_protocol"})["content"][0]["text"])
 assert res.get("results") and res["results"][0]["ok"], res
+os.environ["NAS_YES"] = "1"
+before = len(sessions[0].sent)
+res = json.loads(auto.call_tool("incident_fix", {"only": "smb_min_protocol", "confirm": False})["content"][0]["text"])
+assert "results" not in res and all(is_read_method(m) for _, m in sessions[0].sent[before:]), res
+# NAS_YES does not turn on auto-confirm for `nas mcp`; --auto-confirm does
+from nas import cli
+seen = []
+real_serve = mcp.serve
+mcp.serve = lambda i, o, f, auto_confirm=False: seen.append(auto_confirm) or 0
+cli.main(["mcp"])
+cli.main(["mcp", "--auto-confirm"])
+mcp.serve = real_serve
+del os.environ["NAS_YES"]
+assert seen == [False, True], seen
+# setup: command: credential sources are a command-line option of `nas setup`
+for k in ("password_source", "otp_source"):
+    r = mcp.Server(factory).call_tool("setup", {k: "command:touch /tmp/x"})
+    assert r["isError"] and r["_meta"]["exit_code"] == 2 and "nas setup --" in r["content"][0]["text"], r
+assert "cmdline" in mcp.INSTRUCTIONS and "descr" in mcp.INSTRUCTIONS and "(user)" in mcp.INSTRUCTIONS
 # setup without anything configured: the missing-fields JSON, exit_code 3, no prompt
 import tempfile
 os.environ["NAS_CONFIG"] = os.path.join(tempfile.mkdtemp(), "c.json")

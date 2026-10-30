@@ -10,6 +10,7 @@ One pass of checks. Exit status 0 when nothing is at warning/critical level (inf
 {"level": "critical|warning|info", "code": "firewall_off", "kind": "condition|event", "message": "..."}
 ```
 
+- `message` is at most 500 characters with control characters escaped (`\n`, `\x1b`, ...): account names and addresses in it come from the connection log, where whoever signs in chooses the account field.
 - `kind: condition` is true right now and repeats on every run while it lasts.
 - `kind: event` happened since the previous run and is reported once. Events come from the baseline file (`alert.state_file`): per-disk Power_Cycle_Count, the NAS boot time, and the newest connection-log entry already seen. The first run writes the baseline and reports no events. Keep the scheduled run in one place; for manual looks elsewhere use `--no-update` so the baseline is not touched.
 

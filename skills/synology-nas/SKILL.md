@@ -53,8 +53,8 @@ Sessions: by default each command signs in and out. `nas login` caches the sessi
 | SSH/FTP/SMB/AFP/NFS/rsync/QuickConnect/AutoBlock | `nas services` |
 | Shares, packages (SA-26:14), containers, users and 2FA, scheduled tasks | `nas inventory` |
 | Failed and external sign-ins | `nas logs [--since "YYYY-MM-DD HH:MM"] [--limit N] [--top N]` |
-| Search shares for `*.L0CK3D`, `*.LOCK3D`, `read-me3.txt` | `nas ransom-scan [--pattern P] [--share S]` |
-| Ransomware incident audit / fix | `nas incident [--probe] [--scan] [--deep]`, `nas incident fix --dry-run` (see `synology-ransomware-response`) |
+| Search shares for `*.L0CK3D`, `*.LOCK3D`, `read-me3.txt` | `nas ransom-scan [--pattern P] [--timeout SEC]` (every share the account can see) |
+| Ransomware incident audit / fix / freeze / key recovery | `nas incident [--probe] [--scan] [--deep]`, `nas incident fix --dry-run`, `nas incident contain [--yes]`, `nas incident rescue --yes --capture-dir /SHARE/rescue` (see `synology-ransomware-response`) |
 | Ports reachable from this machine | `nas exposure [--probe-timeout SEC]` |
 | One-pass monitoring (exit 1 on warning/critical) or webhook push | `nas alert [--no-update] [--push FILE]` |
 | Deploy 10-minute root monitoring task + DSM webhook on the NAS | `nas alert-deploy [--test] [--interval 10] [--webhook-item op://VAULT/ITEM]` |
@@ -64,7 +64,7 @@ Sessions: by default each command signs in and out. `nas login` caches the sessi
 | DSM update | `nas upgrade --dry-run`, `nas upgrade` (PreCheck only), `nas upgrade --yes` (installs, reboots), `nas upgrade --wait-only` |
 | Session & TLS certificate management | `nas login [--save] [--trust-device]`, `nas logout [--forget]`, `nas trust [--reset ORIGIN]` |
 | Config management | `nas config init [--force]`, `nas config show` |
-| MCP server over stdio | `nas mcp [--auto-confirm]` (`docs/MCP.md`) |
+| MCP server over stdio | `nas mcp [--auto-confirm]` (`docs/MCP.md`; `incident_fix` applies with `confirm: true`, or without `confirm` on an `--auto-confirm` server) |
 | Any API | `nas api SYNO.Core.System info --version 1`; write methods with `--allow-write` (or `--yes` / `NAS_YES=1`) |
 
 Find API names and versions: `nas api SYNO.API.Info query --version 1 query=all` (or `query=SYNO.Core.Foo`). Parameters are `k=v`; values that are not valid JSON are sent as JSON strings automatically.

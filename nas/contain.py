@@ -23,7 +23,7 @@ from .errors import InputRequired, NasError, can_prompt
 from .ioc import clean, run_root_python
 
 RESCUE_URL = "https://github.com/soimy/c3rb3r-rescue"
-SYNC_PACKAGES = ["CloudSync", "HyperBackup", "ContainerManager", "Docker"]
+SYNC_PACKAGES = ["CloudSync", "SynologyDrive", "HyperBackup", "ContainerManager", "Docker"]
 
 CONTAIN = r'''
 import hashlib, json, os, re, signal, sys, time
@@ -31,7 +31,8 @@ OUT, TOKEN, CFG = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
 R = CFG.get("root", "")
 MODE = CFG["mode"]
 res = {"marker": TOKEN, "version": 1, "mode": MODE, "time": time.strftime("%Y-%m-%d %H:%M:%S"), "errors": [],
-       "candidates": [], "frozen": [], "released": [], "saved": []}
+       "candidates": [], "frozen": [], "released": [], "saved": [], "skipped": []}
+PF_KTHREAD = 0x00200000
 ALLOWED = re.compile(r"^(/usr/syno/|/usr/bin/|/usr/sbin/|/bin/|/sbin/|/usr/lib/|/usr/lib64/|/lib/|/lib64/|"
                      r"/usr/libexec/|/usr/local/|/usr/share/|/var/packages/|/volume\d+/@appstore/|"
                      r"/volume\d+/@docker/|/volume\d+/@apphome/)")
@@ -89,31 +90,77 @@ try:
 except (ValueError, IndexError):
     uptime = 0.0
 explicit = set(int(p) for p in CFG.get("pids", []))
-me = set() if R else {os.getpid(), os.getppid()}
+
+
+def stat_of(pid):
+    """(state, ppid, flags, starttime, cpu ticks) from /proc/PID/stat, or None."""
+    s = read(P("/proc/%d/stat" % pid))
+    i = s.rfind(")")
+    f = s[i + 2:].split() if i >= 0 else []
+    try:
+        return f[0], int(f[1]), int(f[6]), int(f[19]), int(f[11]) + int(f[12])
+    except (IndexError, ValueError):
+        return None
+
+
+def exe_of(pid):
+    try:
+        return os.readlink(P("/proc/%d/exe" % pid))
+    except OSError:
+        return ""
+
+
+# this script, its ancestors and init are never signalled
+protected = {0, 1}
+p = int(CFG.get("self_pid") or os.getpid())
+while p > 1 and p not in protected:
+    protected.add(p)
+    st = stat_of(p)
+    p = st[1] if st else 0
+
+
+def why_not(pid):
+    """Reason a PID is never signalled, or None."""
+    if pid in protected:
+        return "pid 1, this script or one of its parents"
+    st = stat_of(pid)
+    if st is None:
+        return "no such process"
+    if st[2] & PF_KTHREAD:
+        return "kernel thread"
+    return None
+
+
+def writing(d, fd):
+    for line in read(d + "/fdinfo/" + fd).splitlines():
+        if line.startswith("flags:"):
+            try:
+                return int(line.split()[1], 8) & 3 in (1, 2)
+            except (IndexError, ValueError):
+                return False
+    return False
 
 
 def scan():
     for pid in os.listdir(P("/proc")) if os.path.isdir(P("/proc")) else []:
-        if not pid.isdigit() or int(pid) in me:
+        if not pid.isdigit():
             continue
         d = P("/proc/" + pid)
-        try:
-            exe = os.readlink(d + "/exe")
-        except OSError:
-            exe = ""
-        if not exe and int(pid) not in explicit:
-            continue  # kernel threads
+        no = why_not(int(pid))
+        if no:
+            if int(pid) in explicit:
+                res["skipped"].append({"pid": int(pid), "reason": no})
+            continue
+        exe = exe_of(int(pid))
+        if not exe:
+            if int(pid) in explicit:
+                res["skipped"].append({"pid": int(pid), "reason": "no executable (exited, or a kernel thread)"})
+            continue
         comm = read(d + "/comm").strip()
         cmd = read(d + "/cmdline", 400).replace("\0", " ").strip()
-        st = read(d + "/stat")
-        i = st.rfind(")")
-        f = st[i + 2:].split() if i >= 0 else []
-        try:
-            ticks = int(f[11]) + int(f[12])
-            start = int(f[19]) / float(CLK)
-            cpu = round(100.0 * ticks / float(CLK) / max(1.0, uptime - start), 1)
-        except (IndexError, ValueError):
-            cpu = 0.0
+        st = stat_of(int(pid))
+        starttime = st[3] if st else None
+        cpu = round(100.0 * st[4] / float(CLK) / max(1.0, uptime - st[3] / float(CLK)), 1) if st else 0.0
         threads = 0
         for line in read(d + "/status", 8192).splitlines():
             if line.startswith("Threads:"):
@@ -125,7 +172,7 @@ def scan():
                     t = os.readlink(d + "/fd/" + fd)
                 except OSError:
                     continue
-                if RANSOM.search(t.replace(" (deleted)", "")):
+                if RANSOM.search(t.replace(" (deleted)", "")) and writing(d, fd):
                     n += 1
                     if len(evidence) < 10:
                         evidence.append(t)
@@ -133,21 +180,32 @@ def scan():
             pass
         container = "docker" in read(d + "/cgroup") or "containerd" in read(d + "/cgroup")
         base = exe.replace(" (deleted)", "").rsplit("/", 1)[-1]
-        reasons = []
+        synology = bool(ALLOWED.match(exe.replace(" (deleted)", "")))
+        reasons, notes = [], []
         if base in NAMES or comm in NAMES or base.lower().startswith("xdy5"):
             reasons.append("known name")
         if BAD_DIR.match(exe) or exe.startswith("/bin/libgld"):
             reasons.append("runs from " + exe.rsplit("/", 1)[0] + "/")
-        if n:
-            reasons.append("holds %d ransom file(s) open" % n)
-        if not container and cpu >= CFG.get("cpu_threshold", 50) and exe and not ALLOWED.match(exe):
+        if not container and cpu >= CFG.get("cpu_threshold", 50) and not synology:
             reasons.append("%.0f%% CPU outside Synology paths" % cpu)
         if int(pid) in explicit:
             reasons.append("--pid")
+            if synology:
+                notes.append("executable under a Synology path (%s)" % exe)
+        if n:
+            if reasons or not synology:
+                reasons.append("writes %d ransom file(s)" % n)
+            else:  # a Synology daemon touching .L0CK3D files (sync, indexing) needs a reason besides the files
+                res["skipped"].append({"pid": int(pid), "exe": exe, "reason": "Synology path; ransom files are its only "
+                                       "link (add --pid %s to include it)" % pid})
         if reasons:
             res["candidates"].append({"pid": int(pid), "exe": exe, "comm": comm, "cmdline": cmd[:400], "cpu": cpu,
                                       "threads": threads, "open_ransom_files": n, "evidence": evidence,
-                                      "container": container, "reasons": reasons})
+                                      "container": container, "synology_path": synology, "starttime": starttime,
+                                      "reasons": reasons, "notes": notes})
+    seen = set(c["pid"] for c in res["candidates"]) | set(k["pid"] for k in res["skipped"])
+    for pid in sorted(explicit - seen):
+        res["skipped"].append({"pid": pid, "reason": why_not(pid) or "no such process"})
 
 
 def verify(pid, want_stopped):
@@ -166,11 +224,25 @@ def verify(pid, want_stopped):
             "ok": bool(states) and (stopped == len(states) if want_stopped else stopped == 0)}
 
 
-if MODE in ("scan", "freeze"):
+if MODE == "scan":
     scan()
 if MODE == "freeze":
-    for c in res["candidates"]:
-        pid = c["pid"]
+    # exactly the processes the scan showed: same PID, start time and executable
+    for t in CFG.get("targets", []):
+        pid = int(t["pid"])
+        no = why_not(pid)
+        st = stat_of(pid)
+        if st is None:
+            res["frozen"].append({"pid": pid, "gone": True, "ok": False})
+            continue
+        if no:
+            res["frozen"].append({"pid": pid, "ok": False, "gone": False, "skipped": no})
+            continue
+        if st[3] != t.get("starttime") or exe_of(pid) != t.get("exe"):
+            res["frozen"].append({"pid": pid, "ok": False, "gone": False,
+                                  "skipped": "start time or executable changed since the scan (PID reused)"})
+            continue
+        res["candidates"].append(t)
         try:
             signal_pid(pid, signal.SIGSTOP)
         except ProcessLookupError:
@@ -205,7 +277,7 @@ if MODE == "freeze":
                                      "size": os.path.getsize(dst)})
         except OSError as e:
             err("--save-exe " + CFG["save_exe"], e)
-    frozen = [f["pid"] for f in res["frozen"] if not f.get("gone")]
+    frozen = [f["pid"] for f in res["frozen"] if not f.get("gone") and not f.get("skipped")]
     if frozen:
         tmp = STATE + ".tmp"
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
@@ -221,6 +293,9 @@ if MODE == "release":
         pids = []
     pids = sorted(set(pids) | explicit)
     for pid in pids:
+        if why_not(pid) and stat_of(pid) is not None:
+            res["released"].append({"pid": pid, "ok": False, "skipped": why_not(pid)})
+            continue
         try:
             signal_pid(pid, signal.SIGCONT)
         except ProcessLookupError:
@@ -320,7 +395,8 @@ def contain(s, args, root: str = "", extra: dict | None = None):
                             "contain script", root=root, timeout=300)
         resumed = resume_sync(s) if s.backend_name in ("password", "local") else []
         lines = ["Released (SIGCONT):"] + [
-            f"  pid {r['pid']}: " + ("gone" if r.get("gone") else "running" if r["ok"] else
+            f"  pid {r['pid']}: " + ("not signalled: " + r["skipped"] if r.get("skipped") else "gone" if r.get("gone")
+                                     else "running" if r["ok"] else
                                      f"{r['stopped']} of {r['threads']} thread(s) still stopped") for r in d["released"]]
         if not d["released"]:
             lines.append("  no PIDs recorded by a previous freeze")
@@ -334,11 +410,14 @@ def contain(s, args, root: str = "", extra: dict | None = None):
     lines = [f"Candidate encryptor processes: {len(cands)}"]
     for c in cands:
         lines.append(f"  pid {c['pid']} {clean(c['exe'], 80)} cpu {c['cpu']}% threads {c['threads']}: "
-                     + "; ".join(c["reasons"]))
+                     + "; ".join(c["reasons"]) + "".join(f" (note: {clean(n, 120)})" for n in c.get("notes", [])))
         lines.append(f"      cmdline: {clean(c['cmdline'], 160)}")
         for e in c["evidence"][:3]:
             lines.append(f"      open: {clean(e, 120)}")
-    data = {"mode": "scan", "candidates": cands, "frozen": [], "paused": [], "saved": [], "errors": scan["errors"]}
+    for k in scan.get("skipped", []):
+        lines.append(f"  not a candidate: pid {k['pid']} {clean(k.get('exe', ''), 60)}: {k['reason']}")
+    data = {"mode": "scan", "candidates": cands, "frozen": [], "paused": [], "saved": [], "errors": scan["errors"],
+            "skipped": scan.get("skipped", [])}
     if not cands and not args.stop_sync:
         lines.append("Nothing to freeze. Scope: nas incident --deep")
         data["next_steps"] = ["nas incident --deep", "nas incident --scan"]
@@ -356,12 +435,15 @@ def contain(s, args, root: str = "", extra: dict | None = None):
 
     d = scan
     if cands:
-        d = run_root_python(s, CONTAIN, script_config("freeze", dict_args(args, pids=[c["pid"] for c in cands]), root,
-                                                      extra), "nas-incident-contain", "contain script", root=root,
-                            timeout=300)
+        targets = [{"pid": c["pid"], "starttime": c.get("starttime"), "exe": c["exe"]} for c in cands]
+        d = run_root_python(s, CONTAIN, script_config("freeze", args, root, dict(extra or {}, targets=targets)),
+                            "nas-incident-contain", "contain script", root=root, timeout=300)
     paused = pause_sync(s) if args.stop_sync else []
     lines.append("Frozen (SIGSTOP; no process is killed):")
     for f in d.get("frozen", []):
+        if f.get("skipped"):
+            lines.append(f"  pid {f['pid']}: not signalled: {f['skipped']}")
+            continue
         if f.get("gone"):
             lines.append(f"  pid {f['pid']}: exited before it could be frozen")
             continue
@@ -383,11 +465,3 @@ def contain(s, args, root: str = "", extra: dict | None = None):
     ok = all(f.get("ok") for f in data["frozen"]) and all(x["stopped"] for x in paused)
     return lines, data, (0 if ok else 1)
 
-
-def dict_args(args, **over):
-    """A copy of argparse args with some fields replaced."""
-    import types
-    d = dict(vars(args))
-    d.update(over)
-    d["pid"] = sorted(set((args.pid or []) + over.get("pids", [])))
-    return types.SimpleNamespace(**d)

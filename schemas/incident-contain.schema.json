@@ -72,6 +72,28 @@
       "items": {
         "type": "string"
       }
+    },
+    "skipped": {
+      "type": "array",
+      "description": "processes that matched only partly or are never signalled (pid 1, kernel threads, the scanning script and its parents), with the reason",
+      "items": {
+        "type": "object",
+        "required": [
+          "pid",
+          "reason"
+        ],
+        "properties": {
+          "pid": {
+            "type": "integer"
+          },
+          "exe": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -123,6 +145,23 @@
           "items": {
             "type": "string"
           }
+        },
+        "synology_path": {
+          "type": "boolean",
+          "description": "executable under a Synology path (/usr/syno, /var/packages, ...)"
+        },
+        "starttime": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "/proc/PID/stat field 22; the freeze signals the PID only if it still matches"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -154,6 +193,10 @@
         },
         "ok": {
           "type": "boolean"
+        },
+        "skipped": {
+          "type": "string",
+          "description": "why this PID was not signalled"
         }
       }
     },

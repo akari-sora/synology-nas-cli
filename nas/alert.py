@@ -26,6 +26,7 @@ import urllib.request
 from . import advisories, config
 from .backends import NasError
 from .commands import _ip_of, fetch_connection_log, need, part, snapshot_state
+from .ioc import clean
 from .manage import _ts_data
 from .upgrade import _version_tuple
 
@@ -126,8 +127,8 @@ def _power_cycles(smart: dict | None) -> int | None:
 def alert(s, args):
     findings: list[dict] = []
 
-    def add(level, code, kind, message):
-        findings.append({"level": level, "code": code, "kind": kind, "message": message})
+    def add(level, code, kind, message):  # messages carry log text (account names, addresses): escaped
+        findings.append({"level": level, "code": code, "kind": kind, "message": clean(message, 500)})
 
     r_sys, r_fw, r_st, r_ups, r_pkg, r_upd = s.call_many([
         {"api": "SYNO.Core.System", "method": "info", "version": 1},
@@ -500,7 +501,7 @@ def push_failure(args, error: str) -> str:
            else f"push: alert_failed already sent ({failures} failures in a row)")
     if failures >= PUSH_FAIL_AFTER and (prev is None or now - _sent_at(prev) >= PUSH_REMIND):
         f = {"level": "warning", "code": "alert_failed", "kind": "condition", "repeat": prev is not None,
-             "message": f"nas alert failed {failures} runs in a row: {error}"[:500]}
+             "message": clean(f"nas alert failed {failures} runs in a row: {error}", 500)}
         err = _post(cfg, _body(now.strftime("%Y-%m-%d %H:%M:%S"), [f], [], set(active) | {"alert_failed"}))
         if err:
             msg = f"push: FAILED ({err})"

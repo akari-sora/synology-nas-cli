@@ -447,8 +447,8 @@ class PasswordBackend:
         if self.origin:
             return self.origin
         if not self.origins:
-            raise NasError("no DSM origin configured: set \"origins\" in the config (nas config init), "
-                           "NAS_ORIGINS, or --lan-origin")
+            raise NasError("no DSM origin configured: run nas setup --origin https://NAS:5001 (or set \"origins\" "
+                           "in the config, NAS_ORIGINS, or --lan-origin)")
         errors = []
         for o in self.origins:
             host, port = _host_port(o)

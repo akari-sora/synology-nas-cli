@@ -77,6 +77,20 @@ findings = alert.alert(m, cli.parse_args(["alert", "--no-update"]))[1]
 assert any(f["code"] == "firewall_off" for f in findings), findings
 check("alert", findings)
 
+
+class Noisy(Minimal):  # an account name with a terminal escape and a newline, signed in from outside the LAN
+    def call(self, api, method, params=None, version=None, timeout=None):
+        if (api, method) == ("SYNO.Core.SyslogClient.Log", "list"):
+            return {"ok": True, "data": {"total": 1, "items": [{"time": "2026/10/30 11:59:00", "descr": (
+                "User [x\x1b[31m\nfake] from [203.0.113.9] signed in to [DSM] successfully via [password]")}]}}
+        return super().call(api, method, params, version, timeout)
+
+
+_env.use_config({"allowed_networks": ["192.0.2.0/24"]})
+ext = [f for f in alert.alert(Noisy(), cli.parse_args(["alert", "--no-update"]))[1] if f["code"] == "external_signin"]
+assert ext and "\x1b" not in ext[0]["message"] and "x\\x1b[31m\\nfake" in ext[0]["message"], ext
+_env.use_config({})
+
 nas = FakeNas()
 check("incident", incident.audit(FakeSession(nas), args())[1])
 check("incident-fix", incident.fix(FakeSession(FakeNas()), args(action="fix", dry_run=True))[1])

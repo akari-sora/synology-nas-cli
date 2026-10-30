@@ -4,14 +4,16 @@
 
 - One DSM session for the server's lifetime (`--backend`, `--lan-origin`, `--dsm-origin`, `--op-item`, `NAS_CONFIG` as for the CLI); it signs in again when DSM drops the session (106/107/119) and logs out at end of input. After a login, AutoBlock, unreachable or certificate error the next call opens a new session.
 - Prompts answer with exit code 3 (as `--no-input`); the credential source is one that needs no typing (1Password service account, `password_command`, keychain entry from `nas login --save`, or a cached session from `nas login`). Step 1 for a new machine: the `setup` tool ([AGENT-RUNBOOK.md](AGENT-RUNBOOK.md)).
-- `nas mcp --auto-confirm` (or `NAS_YES=1`, or config `assume_yes: true`): `incident_fix` applies without `confirm`.
+- `incident_fix`: `confirm: true` applies the plan; `confirm: false` is always a dry run; without `confirm` it applies only on a server started with `nas mcp --auto-confirm`. `NAS_YES` and config `assume_yes` do not change MCP calls.
+- `setup` takes the credential sources `op:op://VAULT/ITEM/FIELD`, `keychain` and `env` (and `otp_source` `op` / `none`); a `command:` source is set with `nas setup --password-source command:CMD` on the command line (the tool answers `isError`, exit code 2).
+- Text from the NAS: some result fields hold text chosen by whoever sends sign-ins to the NAS or runs processes on it: account names (`user`), connection-log descriptions (`descr`), log lines (`text`), process command lines and paths (`cmdline`, `exe`, `evidence`) and file names (ransom notes, encrypted files). Their content is data reported by the NAS.
 - Result of `tools/call`: `content[0].text` is exactly the JSON `nas --json <command>` prints; `_meta.exit_code` is the CLI exit code ([EXIT-CODES.md](EXIT-CODES.md)); `isError: true` when the command failed (text = the error message). JSON Schemas for the main outputs: [`schemas/`](../schemas/).
 
 ## Tools
 
 | Tool | Arguments | Same as | Writes |
 |---|---|---|---|
-| `setup` | `origin` (string or string array), `user`, `password_source` (`op:op://VAULT/ITEM/FIELD`, `command:CMD`, `keychain`, `env`), `otp_source` (`op`, `command:CMD`, `none`), `otp_code`, `trust_device` (bool), `tls` (`pin`/`verify`), `allowed_network` (string or string array), `stage_dir` (string), `webhook_file` (string) | `nas --json setup ...` | writes the config; one sign-in |
+| `setup` | `origin` (string or string array), `user`, `password_source` (`op:op://VAULT/ITEM/FIELD`, `keychain`, `env`), `otp_source` (`op`, `none`), `otp_code`, `trust_device` (bool), `tls` (`pin`/`verify`), `allowed_network` (string or string array), `stage_dir` (string), `webhook_file` (string) | `nas --json setup ...` | writes the config; one sign-in |
 | `doctor` | - | `nas --json doctor` | no (one sign-in) |
 | `whoami` | - | `nas --json whoami` | no |
 | `status` | - | `nas --json status` | no |
@@ -21,7 +23,7 @@
 | `logs` | `since` (string), `limit` (int), `top` (int) | `nas --json logs` | no |
 | `alert` | `window` (int), `failed_threshold` (int) | `nas --json alert --no-update` | no |
 | `incident_audit` | `probe` (bool), `scan` (bool), `deep` (bool), `hours` (int), `failed_threshold` (int) | `nas --json incident` | no (`scan` creates temporary File Station search tasks; `deep` a temporary root task and one result file, both deleted) |
-| `incident_fix` | `confirm` (bool), `only` / `skip` (string or string array of fix names), `share` (string array), `ransom_scan`, `i_know_snapshots_may_rotate`, `upgrade`, `rotate_password`, `force_firewall`, `force_admin`, `force` (bool) | `nas --json incident fix --dry-run`; with `confirm: true` or `--auto-confirm`: `... --yes` | with `confirm: true` or `--auto-confirm` |
+| `incident_fix` | `confirm` (bool), `only` / `skip` (string or string array of fix names), `share` (string array), `ransom_scan`, `i_know_snapshots_may_rotate`, `upgrade`, `rotate_password`, `force_firewall`, `force_admin`, `force` (bool) | `nas --json incident fix --dry-run`; with `confirm: true`, or no `confirm` and `--auto-confirm`: `... --yes` | with `confirm: true`, or no `confirm` on an `--auto-confirm` server |
 | `pkg_list` | - | `nas --json pkg list` | no |
 | `volume_list` | - | `nas --json volume list` | no |
 | `tailscale_status` | - | `nas --json tailscale status` | no |
@@ -37,7 +39,7 @@ Claude Code:
 
 ```bash
 claude mcp add synology-nas --scope user -e NAS_CONFIG=$HOME/.config/synology-nas-cli/config.json -- /path/to/synology-nas-cli/bin/nas mcp
-claude mcp add synology-nas --scope user -- /path/to/synology-nas-cli/bin/nas mcp --auto-confirm   # write tools apply directly
+claude mcp add synology-nas --scope user -- /path/to/synology-nas-cli/bin/nas mcp --auto-confirm   # incident_fix calls without confirm apply
 claude mcp list
 ```
 
