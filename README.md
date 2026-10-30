@@ -2,11 +2,16 @@
 
 **Audit a Synology NAS against the C3RB3R / `.L0CK3D` ransomware campaign with one command, fix what it finds with a second, and keep running DSM from the terminal afterwards.**
 
-`nas` is a small Python CLI (standard library only, Python 3.8+, so it also runs on DSM itself) for the DSM 7 Web API: status, health, logs, packages, volumes, Tailscale, DSM upgrades, scheduled health alerts pushed to a webhook, and an incident command written during the 2026 C3RB3R campaign against internet-exposed Synology NAS (Synology-SA-26:13, SA-26:14).
+[![Releases](https://img.shields.io/badge/releases-GitLab-fc6d26)](https://gitlab.com/aa22396584/synology-nas-cli/-/releases) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+Canonical repository, releases and issues: https://gitlab.com/aa22396584/synology-nas-cli
+
+`nas` is a zero-dependency Python CLI (standard library only, Python 3.8+, so it also runs on DSM itself) and stdio MCP server for the Synology DSM 7 Web API: status, health, logs, packages, volumes, Tailscale, DSM upgrades, scheduled health alerts pushed to a webhook, and an incident audit and remediation tool built during the October 2026 C3RB3R / `.L0CK3D` campaign against internet-exposed Synology NAS boxes (Synology-SA-24:20, SA-26:13, SA-26:14).
 
 Not affiliated with Synology Inc. "Synology", "DSM" and "QuickConnect" are trademarks of Synology Inc.
 
-- [What `nas incident` checks](#what-nas-incident-checks)
+- [Hand it to your agent](#hand-it-to-your-agent)
+- [What it checks and fixes](#what-it-checks-and-fixes)
 - [Install](#install)
 - [Pick your setup](#pick-your-setup)
 - [Configuration](#configuration)
@@ -14,58 +19,119 @@ Not affiliated with Synology Inc. "Synology", "DSM" and "QuickConnect" are trade
 - [Backends](#backends)
 - [Incident quick start](#incident-quick-start)
 - [`nas incident fix`](#nas-incident-fix)
-- [Other commands](#other-commands)
+- [MCP server and agent skills](#mcp-server-and-agent-skills)
 - [Alerts and webhooks](#alerts-and-webhooks)
+- [Command reference summary](#command-reference-summary)
 - [What changes the NAS](#what-changes-the-nas)
 - [Tests](#tests)
 - [繁體中文說明](#繁體中文說明)
 
-For AI agents: [`docs/AGENT-RUNBOOK.md`](docs/AGENT-RUNBOOK.md) (the step-by-step sequence), [`docs/MCP.md`](docs/MCP.md) (`nas mcp`), [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md), [`schemas/`](schemas/) (JSON Schemas of `--json` output), [`llms.txt`](llms.txt), `skills/install.sh` / `skills/install.ps1` (install the skills into `~/.claude/skills`, `~/.cursor/skills`, `~/.codex/skills`, `~/.agents/skills`, `~/.grok/skills`, `~/.gemini/skills`, `~/.config/opencode/skills`, `~/.hermes/shared-skills` where present; `--copy`, `--dry-run`, `--uninstall`).
+## Hand it to your agent
 
-Further reading: [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md) (the campaign and a response checklist), [`docs/ALERTS.md`](docs/ALERTS.md) (alert codes, webhook body, deployment paths), [`docs/DSM-API-NOTES.md`](docs/DSM-API-NOTES.md) (DSM Web API behaviour this tool relies on), and the agent skills in [`skills/`](skills/).
+Paste either prompt into Claude Code, Codex, Cursor, Gemini CLI, OpenCode, or any tool-using AI agent:
 
-## What `nas incident` checks
+**English prompt:**
 
-Read-only. Each item prints `PASS`, `WARN`, `FAIL` or `SKIP` with a one-line hint. `--json` gives the same as JSON. Exit status 1 when any item is `FAIL`.
+```text
+Use https://github.com/akari-sora/synology-nas-cli to audit and fix my Synology NAS at https://192.0.2.10:5001. Follow docs/AGENT-RUNBOOK.md.
+```
 
-| Item | FAIL / WARN when | Fixable by `incident fix` |
+**繁體中文提示詞：**
+
+```text
+使用 https://github.com/akari-sora/synology-nas-cli 檢查並修復我的 Synology NAS（位址：https://192.0.2.10:5001），照著 docs/AGENT-RUNBOOK.md 的步驟執行。
+```
+
+### What the agent does, step by step
+
+1. **Install**: Clones the repository (or installs the package) and verifies `./bin/nas --version`.
+2. **`nas setup`**: Runs `nas setup --json --no-input ...` to write `~/.config/synology-nas-cli/config.json` (mode `0600`), signs in once to verify credentials, and pins DSM's TLS certificate SHA-256 fingerprint on first use.
+3. **`nas doctor`**: Runs `nas doctor --json` to verify configuration, credentials, origin reachability, TLS pin, login, DSM version against SA-26:13, 2-step verification status, administrator capabilities, and clock skew.
+4. **`nas incident`**: Runs `nas incident --json` (and optionally `--probe --scan`) for a read-only audit of DSM version, vulnerable packages, firewall, QuickConnect, UPnP router rules, public ports, external and failed sign-ins, AutoBlock, SMB1, built-in `admin`, snapshot schedules, the unsupported-model WORM lock trap, ransom notes, and CVE-2024-10441 exploit attempts.
+5. **Plan**: Runs `nas incident fix --dry-run --json --ransom-scan` and shows every planned change (`before -> after`), the exact DSM Web API calls, and the corresponding DSM web UI path.
+6. **`nas incident fix --yes`**: Applies the approved plan in order (`snapshot_worm` → `snapshots` → `packages` → `smb_min_protocol` → `quickconnect` → `router_port_forwarding` → `autoblock` → `admin_account` → `firewall`, plus optional `--rotate-password` and `--upgrade`), reads every setting back to verify, and re-runs the audit.
+7. **Optional `--deep` and `alert-deploy`**: Runs `nas incident --deep --json` (one read-only root collector via Task Scheduler checking root-only logs, crontabs, `/bin` binaries, accounts, SSH keys, and `/proc`) and `nas alert-deploy --json --test` (10-minute health and security monitoring pushed to a webhook).
+
+### What you provide along the way
+
+1. **NAS address and account (once)**:
+   - DSM URL (for example `https://192.0.2.10:5001`, plus a VPN/Tailscale URL if used).
+   - An administrator username and where its password comes from (`op://VAULT/ITEM/password`, a password command, or the OS keychain).
+   - Your LAN/VPN subnet CIDR(s) to keep allowed in the firewall (for example `192.0.2.0/24`).
+   - An optional shared folder path for temporary staging (for example `/docker/.nas-cli-deploy`, used by `--deep` and `alert-deploy`).
+2. **A 6-digit 2FA code (once, if 2-step verification is on)**:
+   - When `nas setup` exits `3` with `"field": "otp"`, provide the current 6-digit code; `--trust-device` stores DSM's trusted-device token (`0600`) so subsequent commands do not need a code.
+3. **Plan confirmation**:
+   - Review the dry-run plan before `nas incident fix --yes` runs (and choose whether to include `--rotate-password` or `--upgrade`).
+
+Full agent specification: [`docs/AGENT-RUNBOOK.md`](docs/AGENT-RUNBOOK.md).
+
+## What it checks and fixes
+
+`nas incident` is read-only. Each item prints `PASS`, `WARN`, `FAIL` or `SKIP` with a one-line hint (`--json` outputs structured JSON; schema in [`schemas/incident.schema.json`](schemas/incident.schema.json)). Exit status is `1` when any item is `FAIL`.
+
+| Item | What `nas incident` reports | What `nas incident fix` changes |
 |---|---|---|
-| `dsm_version` | the DSM build is older than the SA-26:13 fixed build for its branch, or the branch (DSM 7.1 and older) gets no fix | `--upgrade` |
-| `sa_26_14_packages` | Calendar, MailStation or PHP 7.3-8.4 below the fixed version: FAIL if running, WARN if stopped | stops running ones |
-| `firewall` | firewall off (FAIL when the NAS holds a public address itself, e.g. dials PPPoE), or on with interfaces that accept unmatched traffic / rules that allow any source | yes |
-| `quickconnect` | QuickConnect or its automatic router port forwarding is on | yes |
-| `router_port_forwarding` | DSM keeps enabled UPnP/NAT-PMP port-forwarding rules on the router | yes |
-| `public_ports` | DSM (or other service) ports answer on the public address. Only with `--probe` (opens TCP connections) | via firewall |
-| `external_signins` | successful sign-ins from addresses outside `allowed_networks` in the connection log | no (investigate) |
-| `failed_signins` | more than `--failed-threshold` (20) failed sign-ins in the last `--hours` (24) | via firewall |
-| `autoblock` | AutoBlock off | yes |
-| `smb_min_protocol` | SMB1 allowed (FAIL when SMB is on) | yes |
-| `admin_account` | the built-in `admin` account is enabled | yes |
-| `snapshot_schedule:<share>` | no snapshot schedule, schedule off, or no scheduled snapshot within `snapshot_max_age_hours` | creates a schedule where none exists (after a clean `--ransom-scan`) |
-| `snapshot_worm:<share>` | immutable-snapshot (WORM) lock on, on a model that does not support it: DSM accepts the setting and scheduled snapshots then silently stop | yes |
-| `ransomware_files` | `*.L0CK3D`, `*.LOCK3D` or `read-me3.txt` found in any share. Only with `--scan` (File Station search, minutes) | no (incident) |
-| `exploit_attempts` | the connection log contains the CVE-2024-10441 sign-in injection (`PLUGIN_VALUE_END`, `LD_PRELOAD=`, `LD_DEBUG_OUTPUT`) or entries from `incident.ioc_ips` (WARN: attempt seen) | no |
-| `exploit_attempts_logs`, `ioc_cron`, `ioc_binaries`, `ioc_users`, `ioc_ssh_keys`, `ioc_processes` | only with `--deep` (one read-only root script): injection blocks in `/var/log/synoplugin`, `synoscgi`, `auth` logs; planted cron files and download-and-run lines; known C3RB3R files; extra uid-0 or unknown accounts; `authorized_keys`; processes from temp folders or outside Synology paths, connections to IOC addresses. Details in [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md#indicators-of-compromise-and-how-nas-incident---deep-checks-them) | no (incident) |
+| `dsm_version` | `FAIL` if the DSM build is older than the SA-26:13 fixed build for its branch, or on a branch with no SA-26:13 fix (DSM 7.1 and older); `PASS` if patched | With `--upgrade`: downloads the newest official `.pat` for the model, runs PreCheck, installs, and reboots |
+| `sa_26_14_packages` | Checks installed packages against Synology-SA-26:14 (Calendar, MailStation, PHP 7.3–8.4): `FAIL` if a vulnerable version is running, `WARN` if installed but stopped | Stops running vulnerable packages (`--only packages`) |
+| `firewall` | `FAIL` when the firewall is off and the NAS holds a public IP itself (e.g. dials PPPoE), `WARN` when off behind NAT, or `FAIL`/`WARN` when interfaces accept unmatched traffic or rules allow any source (`source_ip: all`) | Enables the firewall, adds allow rules for this computer's `/32` (as DSM logged it) plus IPv4 `allowed_networks` on LAN interfaces, sets every non-`global` interface policy to `drop`, and removes allow-any-source rules (`--only firewall`) |
+| `quickconnect` | `FAIL` when QuickConnect or QuickConnect automatic router port forwarding is enabled | Turns off QuickConnect and its UPnP router port forwarding (`--only quickconnect`) |
+| `router_port_forwarding` | `FAIL` when DSM has enabled UPnP/NAT-PMP port-forwarding rules on the router | Disables all router port-forwarding rules managed by DSM (`--only router_port_forwarding`) |
+| `public_ports` | Only with `--probe`: opens TCP connections from this machine to DSM and file-service ports on the NAS's public IP (`FAIL` if any port answers) | Covered by `firewall`, `quickconnect`, and `router_port_forwarding` |
+| `external_signins` | `FAIL` when the connection log contains successful sign-ins from source addresses outside `allowed_networks` | None (investigate unauthorized access; see [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md)) |
+| `failed_signins` | `WARN` when failed sign-ins in the last `--hours` (default `24`) exceed `--failed-threshold` (default `20`) | Mitigated by `firewall` and `autoblock` |
+| `autoblock` | `FAIL` when AutoBlock is disabled | Enables AutoBlock (`10` attempts within `5` minutes, permanent block) and allow-lists this computer's IP plus IPv4 `allowed_networks` (and `127.0.0.1` if `incident.autoblock_allow_loopback` is true) (`--only autoblock`) |
+| `smb_min_protocol` | `FAIL` when SMB is enabled and allows SMB1 (`smb_min_protocol=0`), `WARN` when SMB is off but minimum protocol is SMB1 | Raises minimum SMB protocol to SMB2 (`smb_min_protocol=1`, `smb_max_protocol=3`) (`--only smb_min_protocol`) |
+| `admin_account` | `FAIL` when the built-in `admin` account is enabled (`expired: normal`) | Disables the built-in `admin` account via a temporary root task after checking that another enabled administrator exists and the current session is not `admin` (`--only admin_account`) |
+| `snapshot_schedule:<share>` | Per shared folder: `FAIL` if no snapshot schedule exists, the schedule is disabled, or the newest scheduled snapshot is older than `snapshot_max_age_hours` (default `26` h) | Creates a daily snapshot schedule (`03:30` default) and a 14-day retention policy on shares that have no schedule yet; gated on a clean `--ransom-scan` in the same run or `--i-know-snapshots-may-rotate` (`--only snapshots`) |
+| `snapshot_worm:<share>` | `FAIL` when the immutable-snapshot (WORM) lock is enabled on a model whose `SYNO.DisasterRecovery.Retention info` lacks `worm` (DSM accepts the API call and scheduled snapshots silently stop) | Turns off the unsupported WORM lock on affected shares so scheduled snapshots resume; gated like `snapshots` (`--only snapshot_worm`) |
+| `ransomware_files` | Only with `--scan`: searches shares via File Station for `*.L0CK3D`, `*.LOCK3D`, and `read-me3.txt` (`FAIL` if any match is found) | None (incident response required; see [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md)) |
+| `exploit_attempts` | Scans the DSM connection log for CVE-2024-10441 sign-in injection markers (`PLUGIN_VALUE_END`, `LD_PRELOAD=`, `LD_DEBUG_OUTPUT`) and `incident.ioc_ips` (`WARN` when attempts are seen) | None (check `--deep` to verify whether any attempt succeeded) |
+| `exploit_attempts_logs`, `ioc_cron`, `ioc_binaries`, `ioc_users`, `ioc_ssh_keys`, `ioc_processes` | Only with `--deep`: runs one read-only root collector to inspect `/var/log/synoplugin.log*`, `/var/log/synoscgi.log*`, `/var/log/auth.log*`, crontabs (`/etc/cron.d/synot*`), `/bin/libgld`, `/bin/qnetd`, `/bin/l0ck.enc`, `xdy5*`, extra uid-0 or unknown accounts, `authorized_keys`, and `/proc` processes/connections (`FAIL` on known C3RB3R artifacts, `WARN` on unknown entries) | None (incident response required; see [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md)) |
 
-`SKIP` always says why: the item needs a flag (`--probe`, `--scan`), the API answered with an error, or the box does not have the feature (no Btrfs/Snapshot Replication, no router configured in DSM).
+`SKIP` always states the reason: the item needs a flag (`--probe`, `--scan`), the API returned an error, or the NAS does not use that feature (no Btrfs/Snapshot Replication, no router configured in DSM).
 
 ## Install
 
+### From a Git checkout (zero install)
+
 ```bash
-git clone <this repository> synology-nas-cli
+git clone https://gitlab.com/aa22396584/synology-nas-cli.git synology-nas-cli
 cd synology-nas-cli
-./bin/nas --help                     # runs from the checkout, nothing to install
-ln -s "$PWD/bin/nas" ~/bin/nas       # optional: put it on PATH
+./bin/nas --help                     # runs directly from the checkout (Python 3.8+ stdlib only)
+ln -s "$PWD/bin/nas" ~/bin/nas       # optional: put `nas` on PATH
 ```
 
-or as a package with a `nas` console script:
+### With `pip` from a GitLab release or local checkout
 
 ```bash
+pip install https://gitlab.com/aa22396584/synology-nas-cli/-/archive/v1.0.0/synology-nas-cli-v1.0.0.tar.gz
+# or from a local checkout:
 pip install -e .                     # or: pipx install .
 nas --help
 ```
 
-Then create a config and check the login:
+### On Windows (with `py`)
+
+```powershell
+git clone https://gitlab.com/aa22396584/synology-nas-cli.git synology-nas-cli
+cd synology-nas-cli
+py -3 bin\nas --help
+# or install the console script:
+py -3 -m pip install -e .
+nas --help
+```
+
+### Initialize and verify login
+
+Interactive or agent-driven one-step setup:
+
+```bash
+nas setup --origin https://192.0.2.10:5001 --user ops --password-source op:op://VAULT/ITEM/password --allowed-network 192.0.2.0/24
+nas doctor
+```
+
+Or create the config file from the template and edit it by hand:
 
 ```bash
 nas config init                      # writes ~/.config/synology-nas-cli/config.json (mode 600)
@@ -157,9 +223,9 @@ The username comes from `NAS_USER` / `credentials.username`, else `op_username`,
 
 ### TLS
 
-The `password` backend never uses `HTTP(S)_PROXY`, `ALL_PROXY` or the system proxy settings for DSM. With `tls.verify: false` (default) the SHA-256 of the certificate an origin presents on the first connection is stored in `tls.known_certs_file` (mode 600; `nas: trusting the certificate of ... on first use` on stderr) and every later connection must present the same certificate, otherwise the command stops with `the TLS certificate of ORIGIN changed`. After replacing the DSM certificate: `nas trust --reset https://HOST:PORT`. `nas trust` lists the stored fingerprints. With `tls.verify: true` the system CAs decide and nothing is pinned. A warning is printed when the 1Password token file is readable by other users.
+The `password` backend never uses `HTTP(S)_PROXY`, `ALL_PROXY` or the system proxy settings for DSM. With `tls.verify: false` (default) the SHA-256 of the certificate an origin presents on the first connection is stored in `tls.known_certs_file` (mode 600; `nas: trusting the certificate of ... on first use` on stderr) and every later connection must present the same certificate, otherwise the command stops with `the TLS certificate of ORIGIN changed`. After replacing the DSM certificate: `nas trust --reset https://HOST:PORT`. `nas trust` lists the stored fingerprints. With `tls.verify: true` the system CAs decide and nothing is pinned. A notice is printed when the 1Password token file is readable by other users.
 
-**AutoBlock.** DSM blocks an address after 10 failed sign-ins within 5 minutes by default, often permanently. `nas` never retries a failed password. A wrong password in your source costs one attempt per command, so fix the source before running again. Code 407 means the address is already blocked: remove it from Control Panel > Security > Protection > Allow/Block List from another address.
+**AutoBlock.** DSM blocks an address after 10 failed sign-ins within 5 minutes by default, often permanently. `nas` never retries a failed password. A wrong password in your source costs one attempt per command, so fix the source before running again. Code 407 means the address is already blocked: remove it from Control Panel > Security > Protection > Allow/Block List from another address. See [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) for recovery paths.
 
 ## Backends
 
@@ -213,7 +279,47 @@ Order: `snapshot_worm` -> `snapshots` -> `packages` -> `smb_min_protocol` -> `qu
 
 **A NAS with its own public address** (it dials PPPoE itself, or sits in a DMZ) has no router NAT in front of it: the DSM firewall is then the only layer between every DSM service and the internet. QuickConnect and UPnP port forwarding open DSM to the internet even behind NAT.
 
-## Other commands
+## MCP server and agent skills
+
+### MCP server (`nas mcp`)
+
+`nas mcp` runs a Model Context Protocol server over stdio (JSON-RPC 2.0; protocol versions `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`) exposing 15 tools: `setup`, `doctor`, `whoami`, `status`, `health`, `net`, `services`, `logs`, `alert`, `incident_audit`, `incident_fix`, `pkg_list`, `volume_list`, `tailscale_status`, and `api_read`.
+
+```bash
+claude mcp add synology-nas --scope user -- /path/to/synology-nas-cli/bin/nas mcp
+claude mcp add synology-nas --scope user -- /path/to/synology-nas-cli/bin/nas mcp --auto-confirm
+```
+
+Full tool list, schemas and configuration for Claude Code, Claude Desktop, Cursor and Codex: [`docs/MCP.md`](docs/MCP.md).
+
+### Agent skills installer
+
+The [`skills/`](skills/) folder contains [`skills/synology-nas/SKILL.md`](skills/synology-nas/SKILL.md) and [`skills/synology-ransomware-response/SKILL.md`](skills/synology-ransomware-response/SKILL.md). Install them into existing skill directories (`~/.claude/skills`, `~/.cursor/skills`, `~/.codex/skills`, `~/.agents/skills`, `~/.grok/skills`, `~/.gemini/skills`, `~/.config/opencode/skills`, `~/.hermes/shared-skills`):
+
+```bash
+./skills/install.sh                  # symlink skills into detected agent folders
+./skills/install.sh --copy           # copy instead of symlink (--dry-run, --uninstall also available)
+```
+
+On Windows PowerShell:
+
+```powershell
+.\skills\install.ps1                 # supports --copy, --dry-run, --uninstall
+```
+
+## Alerts and webhooks
+
+`nas alert` runs every health and security check once and exits 1 when something is at warning/critical level. Every finding is `{level, code, kind, message}`. With `--push FILE` it POSTs only what changed since the last successful push to `{"url", "header"}` from FILE: new conditions, a reminder every 24 h for warning/critical ones still present, every event, resolved keys, and one heartbeat a day. Codes, the body format and receiver examples are in [`docs/ALERTS.md`](docs/ALERTS.md).
+
+Three ways to run it:
+
+1. **On the NAS, set up for you:** `nas alert-deploy` copies the code into a root-only folder (`deploy.root_dir`), creates a root Task Scheduler task running `nas --backend local alert --push` every 10 minutes, and points DSM's own notification webhook (Control Panel > Notification > Webhooks) at the same URL.
+2. **On the NAS, by hand:** the same three pieces done in DSM's UI. Steps in [`docs/ALERTS.md`](docs/ALERTS.md#manual-install-on-the-nas).
+3. **From another always-on machine:** cron or launchd running `nas alert --push ...` with the `password` backend. See [`docs/ALERTS.md`](docs/ALERTS.md#from-another-machine-cron--launchd).
+
+Receivers: any HTTPS endpoint that takes a JSON POST with one header (generic JSON receiver), a chat-bot "routine" webhook that starts an agent run per POST (Grok-Bot-style), or no webhook at all: DSM's built-in notifications (email, Synology mobile push through the DS finder / Synology app) cover DSM's own warning/error events. All three are in [`docs/ALERTS.md`](docs/ALERTS.md#receivers).
+
+## Command reference summary
 
 ```bash
 nas setup --origin URL --user USER --password-source SOURCE   # write the config, sign in once, pin the certificate
@@ -227,6 +333,8 @@ nas health        # disks (SMART, temperature), pools, volumes, UPS, CPU, memory
 nas logs --since "2026-10-30 00:00" --top 5   # failed sign-ins by user/IP, external successes
 nas ransom-scan   # File Station search for *.L0CK3D, *.LOCK3D, read-me3.txt (one task per pattern)
 nas exposure      # TCP probe of LAN and public addresses from this machine
+nas incident [--probe] [--scan] [--deep] [--hours 24] [--failed-threshold 20]
+nas incident fix [--dry-run] [--yes] [--only LIST] [--skip LIST] [--share S] [--ransom-scan] [--upgrade] [--rotate-password]
 nas upgrade --dry-run | nas upgrade | nas upgrade --yes | nas upgrade --wait-only
 nas pkg list | start ID | stop ID | install ID [--volume /volume1] | uninstall ID [--remove-data] | default-volume [/volumeN]
 nas volume list | volume atime volume_1 noatime
@@ -241,20 +349,21 @@ nas --json <command>                                          # JSON output for 
 nas --no-input <command>                                      # prompts answer with exit 3 (also NAS_NO_INPUT=1; automatic without a terminal)
 nas --yes <command>                                           # accept every confirmation (also NAS_YES=1, config assume_yes)
 nas --force incident fix --yes                                # apply changes whose checks do not pass (--force-firewall, --force-admin, snapshot rotation, reinstall)
-nas mcp                                                       # MCP server on stdio (docs/MCP.md)
+nas mcp [--auto-confirm]                                      # MCP server on stdio (docs/MCP.md)
 ```
 
-## Alerts and webhooks
+### Documentation index
 
-`nas alert` runs every health and security check once and exits 1 when something is at warning/critical level. Every finding is `{level, code, kind, message}`. With `--push FILE` it POSTs only what changed since the last successful push to `{"url", "header"}` from FILE: new conditions, a reminder every 24 h for warning/critical ones still present, every event, resolved keys, and one heartbeat a day. Codes, the body format and receiver examples are in [`docs/ALERTS.md`](docs/ALERTS.md).
-
-Three ways to run it:
-
-1. **On the NAS, set up for you:** `nas alert-deploy` copies the code into a root-only folder (`deploy.root_dir`), creates a root Task Scheduler task running `nas --backend local alert --push` every 10 minutes, and points DSM's own notification webhook (Control Panel > Notification > Webhooks) at the same URL.
-2. **On the NAS, by hand:** the same three pieces done in DSM's UI. Steps in [`docs/ALERTS.md`](docs/ALERTS.md#manual-install-on-the-nas).
-3. **From another always-on machine:** cron or launchd running `nas alert --push ...` with the `password` backend. See [`docs/ALERTS.md`](docs/ALERTS.md#from-another-machine-cron--launchd).
-
-Receivers: any HTTPS endpoint that takes a JSON POST with one header (generic JSON receiver), a chat-bot "routine" webhook that starts an agent run per POST (Grok-Bot-style), or no webhook at all: DSM's built-in notifications (email, Synology mobile push through the DS finder / Synology app) cover DSM's own warning/error events. All three are in [`docs/ALERTS.md`](docs/ALERTS.md#receivers).
+- [`docs/AGENT-RUNBOOK.md`](docs/AGENT-RUNBOOK.md) — Step-by-step sequence for AI agents (`setup` → `doctor` → `incident` → `incident fix` → `--deep` → `alert-deploy`).
+- [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md) — Public incident page for the 2026 C3RB3R / `.L0CK3D` ransomware campaign, advisories, timeline, IOCs, decision steps, recovery and prevention.
+- [`docs/HARDENING.md`](docs/HARDENING.md) — Synology DSM security hardening checklist with sourced explanations, English / 繁體中文 DSM UI paths, and matching `nas` commands.
+- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — Solutions for firewall/AutoBlock/2FA lockouts, Mode 1 reset, reverse proxies and Tailscale `127.0.0.1`, unsupported WORM models, Google Drive 750 GB/day quota, SMB1 devices, DSM API error codes, "up to date" branch traps, and TLS pin resets.
+- [`docs/MCP.md`](docs/MCP.md) — MCP server tools, arguments, schemas, and client setup.
+- [`docs/ALERTS.md`](docs/ALERTS.md) — Alert codes, webhook payload, receivers, and deployment (`alert-deploy`, manual DSM task, cron/launchd).
+- [`docs/DSM-API-NOTES.md`](docs/DSM-API-NOTES.md) — DSM 7 Web API quirks and parameter encoding rules relied on by `nas`.
+- [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md) — CLI and MCP `_meta.exit_code` definitions (`0`–`7`, `130`).
+- [`schemas/`](schemas/) — JSON Schemas for `incident`, `incident-fix`, `alert`, `status`, `health`, and `whoami`.
+- [`llms.txt`](llms.txt) — Entry-point index for LLM agents.
 
 ## What changes the NAS
 
@@ -271,19 +380,97 @@ tests/run_offline.sh      # all offline tests with python3, and with Python 3.8 
 tests/smoke_live.sh       # optional: read-only commands against your NAS (uses your config)
 ```
 
+---
+
 ## 繁體中文說明
 
-**一個指令檢查 Synology NAS 有沒有被 C3RB3R／`.L0CK3D` 勒索潮打中的弱點，再一個指令把找到的問題修好；平常也能在終端機管理 DSM。**
+**一個指令檢查 Synology NAS 是否有 C3RB3R／`.L0CK3D` 勒索軟體攻擊活動相關的弱點與入侵指標，第二個指令依計畫把問題修好；日常也能直接在終端機或透過 AI Agent 管理與監控 DSM。**
 
-- 只用 Python 標準函式庫（3.8 以上），在 DSM 上也能直接跑。本專案與 Synology 無關。
-- 安裝：`git clone` 之後直接跑 `bin/nas`，或 `pip install -e .`。`nas config init` 產生設定檔（`~/.config/synology-nas-cli/config.json`），填上 DSM 網址和帳密來源，`nas whoami` 確認能登入。
-- 帳密來源依序：1Password（`op://` 參照，service account token 或已登入的 1Password App）→ `NAS_PASSWORD_COMMAND`（任何印出密碼的指令，例如 macOS 鑰匙圈、`secret-tool`、`pass`、Bitwarden）→ `nas login --save` 存進系統鑰匙圈 → `NAS_USER` + `NAS_PASSWORD`（最不安全）→ 在終端機互動輸入。兩步驟驗證碼可來自 `otp_command`、1Password 或互動輸入；`nas login --trust-device` 讓 DSM 記住這台裝置。
-- `nas incident`：唯讀檢查 DSM 版本（SA-26:13）、SA-26:14 套件、防火牆、QuickConnect、路由器連接埠轉送、公網連接埠（`--probe`）、外部登入成功紀錄、登入失敗次數、自動封鎖、SMB1、內建 admin、各共用資料夾的排程快照，以及不支援卻開了不可變快照（WORM）導致排程快照靜靜停掉的陷阱、勒索檔案（`--scan`）。每項 PASS／WARN／FAIL／SKIP，有 FAIL 時結束碼 1。
-- `nas incident fix`：先列出計畫（每項變更的現值→新值、實際送出的 API、DSM 網頁上的對應位置），確認後依序套用並逐項讀回驗證，最後重跑檢查列出前後對照。`--dry-run` 只印計畫不送出任何寫入；`--only`／`--skip` 選項目；`--upgrade`、`--rotate-password`、`--ransom-scan` 要另外加。快照相關修復要先跑乾淨的 `--ransom-scan`（或加 `--i-know-snapshots-may-rotate`），因為開始排程快照會套用保留原則、可能刪掉還原需要的舊快照；只替沒有排程的共用資料夾建立排程，不改既有排程和保留原則。
-- TLS：連 DSM 不經過任何 proxy；自簽憑證第一次連線時記下指紋，之後換憑證就拒絕連線（`nas trust --reset` 重新信任）。
-- 防火牆保護：以 DSM 連線紀錄裡這次登入的來源位址為準，跟本機位址不一致、是 loopback／IPv6／公網位址、或設了 proxy 就拒絕套用；允許清單預設只有這台電腦（/32）加上 `allowed_networks`，規則放在區網介面上；套用後重新登入一次確認，失敗會印出救援步驟（區網其他電腦、Synology Assistant、Tailscale、RESET 鍵 mode 1）。NAS 自己撥 PPPoE 拿到公網 IP 時，前面沒有路由器 NAT，DSM 防火牆就是唯一一層。
-- AutoBlock：預設 5 分鐘內失敗 10 次就封鎖來源 IP。這個工具登入失敗不會重試。
-- 監控：`nas alert` 可推播到任何 HTTPS webhook；`nas alert-deploy` 把它裝到 NAS 上用 root 排程跑，也可以手動在 DSM 設定，或在另一台常開的電腦用 cron／launchd 跑。不想用 webhook 時，DSM 內建的 Email／手機推播通知也能收到 DSM 自己的警告。
+`nas` 是僅依賴 Python 標準函式庫（Python 3.8+，因此也能直接在 DSM 內建環境執行）的命令列工具與 MCP 伺服器，支援 DSM 7 Web API：系統狀態、硬碟與儲存空間健康度、連線紀錄、套件管理、儲存空間 `noatime`、Tailscale、DSM 自動下載與升級、排程健康檢查與 Webhook 推播，以及針對 2026 年 C3RB3R／`.L0CK3D` 勒索攻擊（Synology-SA-24:20、SA-26:13、SA-26:14）設計的唯讀稽核與一鍵修復流程。本專案與 Synology Inc. 無關。
+
+### 交給 AI Agent 自動執行
+
+把以下提示詞貼給 Claude Code、Codex、Cursor、Gemini CLI 或任何支援工具呼叫的 AI Agent：
+
+```text
+使用 https://github.com/akari-sora/synology-nas-cli 檢查並修復我的 Synology NAS（位址：https://192.0.2.10:5001），照著 docs/AGENT-RUNBOOK.md 的步驟執行。
+```
+
+#### Agent 會依序執行的步驟
+
+1. **安裝**：複製此儲存庫（或用 `pip` 安裝）並執行 `./bin/nas --version` 確認環境。
+2. **`nas setup`**：執行 `nas setup --json --no-input ...` 寫入 `~/.config/synology-nas-cli/config.json`（權限 `0600`）、進行首次登入驗證，並在首次連線時釘選（pin）DSM 的 TLS 憑證 SHA-256 指紋。
+3. **`nas doctor`**：執行 `nas doctor --json` 檢查設定檔、憑證來源、連線可達性、TLS 指紋、登入狀態、DSM 版本（比對 SA-26:13）、兩步驟驗證（2FA）、管理員權限與系統時鐘偏差。
+4. **`nas incident`**：執行 `nas incident --json`（可加 `--probe --scan`）進行唯讀安全稽核。
+5. **產生修復計畫**：執行 `nas incident fix --dry-run --json --ransom-scan`，列出每一項變更的前後對照（`before -> after`）、實際會發送的 DSM API 呼叫與 DSM 網頁介面路徑。
+6. **套用修復（`nas incident fix --yes`）**：依安全順序套用修復、逐項讀回設定確認生效，並重跑一次稽核輸出前後對比。
+7. **進階入侵指標檢查與監控部署（選用）**：執行 `nas incident --deep --json`（透過暫時性 root 排程任務執行唯讀腳本，檢查 root 專屬日誌、排程、可疑執行檔、帳號、SSH 金鑰與程序）以及 `nas alert-deploy --json --test`（每 10 分鐘自動檢查並推播異常到 Webhook）。
+
+#### 使用者沿途只需提供的資訊
+
+1. **NAS 位址與帳號（一次）**：DSM 網址（例如 `https://192.0.2.10:5001`）、管理員帳號名稱、密碼來源（1Password `op://VAULT/ITEM/password`、密碼指令或系統鑰匙圈）、防火牆要放行的區網／VPN 網段（例如 `192.0.2.0/24`），以及供 `--deep` 與 `alert-deploy` 暫存檔案的共用資料夾路徑（例如 `/docker/.nas-cli-deploy`）。
+2. **兩步驟驗證碼（若帳號已啟用 2FA，僅需一次）**：當 `nas setup` 回報需要 `otp` 時提供當下的 6 位數驗證碼；加上 `--trust-device` 後會儲存 DSM 的信任裝置權杖，之後執行不需再輸入驗證碼。
+3. **確認修復計畫**：檢視 `--dry-run` 列出的變更內容（並決定是否加上選用的 `--rotate-password` 換密碼或 `--upgrade` 升級 DSM）。
+
+### `nas incident` 檢查項目與 `nas incident fix` 修復內容
+
+| 項目 | `nas incident` 檢查內容 | `nas incident fix` 變更內容 |
+|---|---|---|
+| `dsm_version` | DSM 版本是否低於 SA-26:13 修補版本，或處於無修補程式的舊分支（DSM 7.1 及更舊版本） | 加 `--upgrade` 時自動下載官方最新 `.pat`、執行 PreCheck 並安裝重開機 |
+| `sa_26_14_packages` | Calendar、MailStation、PHP 7.3–8.4 是否低於 SA-26:14 修補版本（執行中為 `FAIL`，已停止為 `WARN`） | 停止正在執行的未修補套件（`--only packages`） |
+| `firewall` | 防火牆未開（NAS 自己撥 PPPoE 持有公網 IP 時為 `FAIL`），或開啟但介面預設允許未比對流量、規則允許任意來源（`source_ip: all`） | 啟用防火牆、在區網介面放行本機 `/32`（依 DSM 連線紀錄）與 `allowed_networks` 的 IPv4 網段、將所有非 `global` 介面設為預設丟棄（`drop`），並移除允許任意來源的規則（`--only firewall`） |
+| `quickconnect` | QuickConnect 或其自動路由器連接埠轉送開啟 | 關閉 QuickConnect 與其 UPnP 自動連接埠轉送（`--only quickconnect`） |
+| `router_port_forwarding` | DSM 在路由器上設有啟用中的 UPnP／NAT-PMP 連接埠轉送規則 | 停用 DSM 管理的路由器連接埠轉送規則（`--only router_port_forwarding`） |
+| `public_ports` | 搭配 `--probe`：從本機對 NAS 公網位址測試 DSM 與檔案服務連接埠是否可連上 | 透過 `firewall`、`quickconnect` 與 `router_port_forwarding` 關閉暴露面 |
+| `external_signins` | 連線紀錄中是否有來自 `allowed_networks` 以外的成功登入紀錄 | 不自動修改（需人工調查是否遭入侵，見 [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md)） |
+| `failed_signins` | 過去 `--hours`（預設 24 小時）內登入失敗次數超過 `--failed-threshold`（預設 20 次） | 透過 `firewall` 與 `autoblock` 阻擋 |
+| `autoblock` | 自動封鎖（AutoBlock）未啟用 | 啟用自動封鎖（5 分鐘內失敗 10 次永久封鎖），並將本機 IP 與 `allowed_networks` 加入允許清單（若設定 `incident.autoblock_allow_loopback` 亦會加入 `127.0.0.1`）（`--only autoblock`） |
+| `smb_min_protocol` | 允許 SMB1（SMB 啟用時為 `FAIL`） | 將 SMB 最低通訊協定調升為 SMB2（`--only smb_min_protocol`） |
+| `admin_account` | 內建 `admin` 帳號仍處於啟用狀態 | 確認目前非以 `admin` 登入且另有其他啟用中的管理員後，透過暫時性 root 排程任務停用 `admin`（`--only admin_account`） |
+| `snapshot_schedule:<share>` | 各共用資料夾是否未設排程快照、排程停用，或最近一次排程快照超過 `snapshot_max_age_hours`（26 小時） | 為尚無排程的共用資料夾建立每日快照排程與 14 天保留原則；需同次執行乾淨的 `--ransom-scan` 或加 `--i-know-snapshots-may-rotate`（`--only snapshots`） |
+| `snapshot_worm:<share>` | 在不支援不可變快照（WORM）的機型上誤開 WORM 鎖定（DSM API 會回傳成功，但排程快照會從此靜默停擺） | 關閉不支援機型上的 WORM 鎖定，讓排程快照恢復運作（`--only snapshot_worm`） |
+| `ransomware_files` | 搭配 `--scan`：透過 File Station 搜尋所有共用資料夾是否有 `*.L0CK3D`、`*.LOCK3D` 或 `read-me3.txt` | 不自動修改（若為 `FAIL` 請立即隔離並依 [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md) 處置） |
+| `exploit_attempts` | 掃描連線紀錄是否有 CVE-2024-10441 登入注入字串（`PLUGIN_VALUE_END`、`LD_PRELOAD=`、`LD_DEBUG_OUTPUT`）或 `incident.ioc_ips` | 不自動修改（可進一步執行 `--deep` 確認是否成功植入） |
+| `exploit_attempts_logs`、`ioc_cron`、`ioc_binaries`、`ioc_users`、`ioc_ssh_keys`、`ioc_processes` | 搭配 `--deep`：執行唯讀 root 收集器檢查 `/var/log/synoplugin.log*`、`synoscgi.log*`、`auth.log*`、`/etc/cron.d/synot*`、`/bin/libgld`、`/bin/qnetd`、`/bin/l0ck.enc`、異常帳號、`authorized_keys` 與 `/proc` 程序／外部連線 | 不自動修改（若為 `FAIL` 請依 [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md) 進行事件應變） |
+
+### 安裝與環境設定
+
+```bash
+# 方式一：git clone 後直接執行（不需額外安裝套件）
+git clone https://gitlab.com/aa22396584/synology-nas-cli.git synology-nas-cli
+cd synology-nas-cli
+./bin/nas --help
+
+# 方式二：使用 pip 從 GitLab release 或本地目錄安裝
+pip install https://gitlab.com/aa22396584/synology-nas-cli/-/archive/v1.0.0/synology-nas-cli-v1.0.0.tar.gz
+# 或：pip install -e .
+
+# 方式三：Windows 使用 py 啟動器
+py -3 bin\nas --help
+py -3 -m pip install -e .
+```
+
+依作業系統與環境選擇設定方式：
+
+- **macOS 搭配 1Password**：`credentials.op_password` 填 `op://VAULT/ITEM/password`，透過 1Password App 授權 `op` 讀取密碼與 2FA 驗證碼。
+- **macOS 不使用 1Password**：執行 `nas login --save` 存入 macOS 鑰匙圈，或設 `password_command` 為 `security find-generic-password -s synology-nas -a USER -w`。
+- **Linux 伺服器／cron／systemd**：使用 1Password Service Account（`OP_SERVICE_ACCOUNT_TOKEN` 或 token 檔案）搭配 `op://`，或設 `password_command`（`secret-tool lookup ...`、`pass show ...`）。
+- **Windows**：以 PowerShell `CredentialManager` 模組儲存憑證，並在 `password_command` 呼叫 `Get-StoredCredential`，或使用環境變數 `NAS_USER` + `NAS_PASSWORD`。
+- **在 NAS 本機上執行**：使用 `--backend local`（由 DSM 任務排程表以 `root` 執行 `synowebapi --exec`，不需密碼；`nas alert-deploy` 會自動部署）。
+
+### 憑證、TLS、防火牆與 AutoBlock 重點
+
+- **憑證優先順序**：1Password（`op`）→ 外部指令（`command`）→ 系統鑰匙圈（`keychain`，由 `nas login --save` 寫入）→ 環境變數（`env`）→ 終端機互動輸入（`prompt`）。
+- **TLS 憑證釘選**：`password` 後端連線 DSM 絕不經過任何系統或環境變數 Proxy。預設 `tls.verify: false` 會在首次連線時將憑證 SHA-256 指紋寫入 `~/.config/synology-nas-cli/known-certs.json`（權限 `0600`）；之後若憑證變更會拒絕連線並以結束碼 `7` 停止。更新憑證後可執行 `nas trust --reset https://HOST:PORT`。
+- **防火牆防自鎖機制**：套用防火牆前會比對 DSM 連線紀錄中的登入來源 IP 與本機連線 IP；若經過 Proxy、來源為 loopback／IPv6／公網 IP 或兩者不一致，會暫緩套用並提示使用 `--force-firewall`。套用後會立即重新登入驗證；若失敗會列出救援方式（區網其他電腦、Synology Assistant、Tailscale userspace 模式、機身背面 RESET 鍵 Mode 1）。
+- **AutoBlock 注意事項**：DSM 預設 5 分鐘內登入失敗 10 次即封鎖來源 IP。`nas` 遇到密碼錯誤只會嘗試一次並立即停止，絕不重試。
+
+### MCP 伺服器、Skills 與監控推播
+
+- **MCP 伺服器**：執行 `nas mcp` 啟動 stdio MCP 伺服器（詳見 [`docs/MCP.md`](docs/MCP.md)）。
+- **Skills 安裝器**：執行 `./skills/install.sh`（Windows 為 `.\skills\install.ps1`）將 `synology-nas` 與 `synology-ransomware-response` 安裝至各 AI Agent 的技能目錄（支援 `--copy`、`--dry-run`、`--uninstall`）。
+- **排程監控與 Webhook**：`nas alert --push webhook.json` 僅在狀態變化、警告持續滿 24 小時或每日一次心跳時發送 POST；`nas alert-deploy --test` 可一鍵部署至 NAS 以 root 每 10 分鐘執行，並同步設定 DSM 內建通知 Webhook（詳見 [`docs/ALERTS.md`](docs/ALERTS.md)）。
+- **更多文件**：[`docs/AGENT-RUNBOOK.md`](docs/AGENT-RUNBOOK.md)、[`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md)、[`docs/HARDENING.md`](docs/HARDENING.md)、[`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)、[`docs/DSM-API-NOTES.md`](docs/DSM-API-NOTES.md)、[`docs/EXIT-CODES.md`](docs/EXIT-CODES.md)。
 
 ## License
 

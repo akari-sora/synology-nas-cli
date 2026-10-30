@@ -2,8 +2,8 @@
 
 `nas mcp` speaks the Model Context Protocol over stdio: JSON-RPC 2.0, one JSON message per line on stdin, replies on stdout, diagnostics on stderr. Protocol versions: `2025-11-25` (default), `2025-06-18`, `2025-03-26`, `2024-11-05` (the client's requested version is used when listed). Capabilities: `tools` only. Methods: `initialize`, `ping`, `tools/list`, `tools/call`; notifications are accepted and ignored; a batch is answered with an error.
 
-- One DSM session for the server's lifetime (`--backend`, `--lan-origin`, `NAS_CONFIG` as for the CLI); it signs in again when DSM drops the session (106/107/119) and logs out at end of input. After a login, AutoBlock, unreachable or certificate error the next call opens a new session.
-- Prompts answer with exit code 3 (as `--no-input`); the credential source is one that needs no typing (1Password service account, `password_command`, keychain entry from `nas login --save`, or a cached session from `nas login`). Step 1 for a new machine: the `setup` tool.
+- One DSM session for the server's lifetime (`--backend`, `--lan-origin`, `--dsm-origin`, `--op-item`, `NAS_CONFIG` as for the CLI); it signs in again when DSM drops the session (106/107/119) and logs out at end of input. After a login, AutoBlock, unreachable or certificate error the next call opens a new session.
+- Prompts answer with exit code 3 (as `--no-input`); the credential source is one that needs no typing (1Password service account, `password_command`, keychain entry from `nas login --save`, or a cached session from `nas login`). Step 1 for a new machine: the `setup` tool ([AGENT-RUNBOOK.md](AGENT-RUNBOOK.md)).
 - `nas mcp --auto-confirm` (or `NAS_YES=1`, or config `assume_yes: true`): `incident_fix` applies without `confirm`.
 - Result of `tools/call`: `content[0].text` is exactly the JSON `nas --json <command>` prints; `_meta.exit_code` is the CLI exit code ([EXIT-CODES.md](EXIT-CODES.md)); `isError: true` when the command failed (text = the error message). JSON Schemas for the main outputs: [`schemas/`](../schemas/).
 
@@ -11,7 +11,7 @@
 
 | Tool | Arguments | Same as | Writes |
 |---|---|---|---|
-| `setup` | `origin` (string or string array), `user`, `password_source` (`op:op://VAULT/ITEM/FIELD`, `command:CMD`, `keychain`, `env`), `otp_source` (`op`, `command:CMD`, `none`), `otp_code`, `trust_device` (bool), `tls` (`pin`/`verify`) | `nas --json setup ...` | writes the config; one sign-in |
+| `setup` | `origin` (string or string array), `user`, `password_source` (`op:op://VAULT/ITEM/FIELD`, `command:CMD`, `keychain`, `env`), `otp_source` (`op`, `command:CMD`, `none`), `otp_code`, `trust_device` (bool), `tls` (`pin`/`verify`), `allowed_network` (string or string array), `stage_dir` (string), `webhook_file` (string) | `nas --json setup ...` | writes the config; one sign-in |
 | `doctor` | - | `nas --json doctor` | no (one sign-in) |
 | `whoami` | - | `nas --json whoami` | no |
 | `status` | - | `nas --json status` | no |

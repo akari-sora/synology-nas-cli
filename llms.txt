@@ -1,25 +1,30 @@
 # synology-nas-cli
 
-> `nas`: a Python (stdlib, 3.8+) CLI and MCP server for a Synology NAS (DSM 7 Web API): status, health, logs, packages, alerts, and a read-only audit plus a planned, confirmable fix for the C3RB3R / .L0CK3D ransomware campaign (Synology-SA-26:13, SA-26:14). Not affiliated with Synology.
+> `nas`: a zero-dependency Python (stdlib, 3.8+) CLI and stdio MCP server for Synology DSM 7 NAS boxes: onboarding (`setup`, `doctor`), status, health, logs, packages, volumes, Tailscale, DSM upgrades, scheduled health alerts pushed to a webhook (`alert`, `alert-deploy`), and a read-only audit plus one-command remediation (`incident`, `incident fix`) for the 2026 C3RB3R / `.L0CK3D` ransomware campaign (Synology-SA-24:20, SA-26:13, SA-26:14). Not affiliated with Synology Inc.
 
-## Start here
+## Read first (for AI agents)
 
-- [README.md](README.md): install, configuration keys, credential chain, commands, `incident` items and the `incident fix` table
-- [CLAUDE.md](CLAUDE.md): code layout and conventions for working on the repository (AGENTS.md is the same file)
+1. [docs/AGENT-RUNBOOK.md](docs/AGENT-RUNBOOK.md): the step-by-step sequence an agent executes (`install` -> `nas setup` -> `nas doctor` -> `nas incident` -> `nas incident fix --dry-run` -> `nas incident fix --yes` -> optional `--deep` and `alert-deploy`), exit codes, JSON payloads, and the exact fields to ask a person once
+2. [README.md](README.md): full user and agent guide (English and 繁體中文), what `nas incident` checks and what `nas incident fix` changes, installation, environment setup table, configuration keys, credential chain, TLS pinning, and command summary
+3. [docs/EXIT-CODES.md](docs/EXIT-CODES.md): exit codes (`0` ok, `1` attention/failure, `2` usage/config, `3` input required, `4` login rejected, `5` AutoBlock 407, `6` unreachable/upgrading, `7` TLS certificate changed)
+4. [docs/MCP.md](docs/MCP.md): `nas mcp` stdio MCP server tools (`setup`, `doctor`, `whoami`, `status`, `health`, `net`, `services`, `logs`, `alert`, `incident_audit`, `incident_fix`, `pkg_list`, `volume_list`, `tailscale_status`, `api_read`) and client config
+5. [schemas/](schemas/): JSON Schemas for `--json` outputs (`incident.schema.json`, `incident-fix.schema.json`, `alert.schema.json`, `status.schema.json`, `health.schema.json`, `whoami.schema.json`)
 
-## Using it from an agent
+## Skills
 
-- [docs/AGENT-RUNBOOK.md](docs/AGENT-RUNBOOK.md): the step-by-step sequence (install, `nas setup`, `nas doctor`, audit, plan, fix) with exit codes, JSON and the values a person provides
-- [docs/MCP.md](docs/MCP.md): `nas mcp` tools, arguments, result format, client configuration
-- [docs/EXIT-CODES.md](docs/EXIT-CODES.md): exit codes (3 input required, 4 login failed, 5 AutoBlock, 6 unreachable, 7 certificate changed)
-- [schemas/](schemas/): JSON Schemas of `--json` output (incident, incident-fix, alert, status, health, whoami)
-- [skills/synology-nas/SKILL.md](skills/synology-nas/SKILL.md): operating the NAS with `nas`
-- [skills/synology-ransomware-response/SKILL.md](skills/synology-ransomware-response/SKILL.md): incident playbook
-- [skills/install.sh](skills/install.sh) / [skills/install.ps1](skills/install.ps1): install the skills into agent skill folders
+- [skills/synology-nas/SKILL.md](skills/synology-nas/SKILL.md): operating and troubleshooting a Synology NAS with `nas`
+- [skills/synology-ransomware-response/SKILL.md](skills/synology-ransomware-response/SKILL.md): C3RB3R / `.L0CK3D` incident audit, containment, remediation, and snapshot recovery playbook
+- [skills/install.sh](skills/install.sh) / [skills/install.ps1](skills/install.ps1): install the skills into agent skill directories (`--copy`, `--dry-run`, `--uninstall`)
 
-## Reference
+## Incident response, hardening, and troubleshooting
 
-- [docs/INCIDENT-C3RB3R.md](docs/INCIDENT-C3RB3R.md): the campaign, advisories, response checklist
-- [docs/DSM-API-NOTES.md](docs/DSM-API-NOTES.md): DSM Web API behaviour (parameter encoding, error codes, firewall, AutoBlock, snapshots, root tasks)
-- [docs/ALERTS.md](docs/ALERTS.md): alert codes, webhook body, deployment paths
-- [config.example.json](config.example.json): example configuration
+- [docs/INCIDENT-C3RB3R.md](docs/INCIDENT-C3RB3R.md): public incident page for the 2026 C3RB3R / `.L0CK3D` campaign, advisories (SA-24:20, SA-26:13, SA-26:14), attribution comparison, timeline, CVE-2024-10441 in-the-wild payload, IOC table (`--deep`), decision steps, recovery (preserve RAM/evidence before reset), and prevention
+- [docs/HARDENING.md](docs/HARDENING.md): Synology DSM security hardening checklist with sourced rationale, English / 繁體中文 DSM UI paths, and matching `nas` commands
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md): firewall/AutoBlock lockout & Mode 1 reset, reverse proxies & Tailscale `127.0.0.1`, unsupported WORM models, Google Drive 750 GB/day quota, SMB1 legacy devices, 2FA lockout, DSM API error codes (105/106/107/119/400/403/404/407/498/499), "DSM says up to date" branch trap, and TLS pin resets (`nas trust`)
+
+## Reference and repository layout
+
+- [docs/ALERTS.md](docs/ALERTS.md): `nas alert` codes, `--push` webhook payload, receivers, and `nas alert-deploy`
+- [docs/DSM-API-NOTES.md](docs/DSM-API-NOTES.md): DSM 7 Web API quirks (SynoToken query param, JSON double encoding, `synowebapi`, TaskScheduler v2, WORM trap, firewall profiles)
+- [CLAUDE.md](CLAUDE.md): codebase architecture and conventions (`AGENTS.md` is a symlink to `CLAUDE.md`)
+- [config.example.json](config.example.json): example configuration file written by `nas config init`

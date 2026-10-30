@@ -1,14 +1,16 @@
 # Agent runbook
 
-The sequence an agent follows from a fresh machine to a hardened NAS. Every command takes `--json` (anywhere on the line) and `--no-input` (prompts answer with exit code 3 instead of waiting). Exit codes: [EXIT-CODES.md](EXIT-CODES.md). Output schemas: [`schemas/`](../schemas/). The same steps exist as MCP tools ([MCP.md](MCP.md)): `setup`, `doctor`, `incident_audit`, `incident_fix`.
+The sequence an agent follows from a fresh machine to an audited, hardened and monitored Synology NAS. Every command takes `--json` (anywhere on the line) and `--no-input` (prompts answer with exit code 3 instead of waiting). Exit codes: [EXIT-CODES.md](EXIT-CODES.md). Output schemas: [`schemas/`](../schemas/). Troubleshooting: [TROUBLESHOOTING.md](TROUBLESHOOTING.md). Hardening reference: [HARDENING.md](HARDENING.md). The same steps exist as MCP tools ([MCP.md](MCP.md)): `setup`, `doctor`, `incident_audit`, `incident_fix`.
 
 ## Step 0: install
 
 ```bash
-git clone <repository URL> synology-nas-cli && cd synology-nas-cli
-./bin/nas --version                     # exit 0; needs Python 3.8+
+git clone https://gitlab.com/aa22396584/synology-nas-cli.git synology-nas-cli && cd synology-nas-cli
+./bin/nas --version                     # exit 0; needs Python 3.8+ (stdlib only)
 # or, as a package with a `nas` command:
-pip install git+<repository URL>        # or: pip install <release archive URL>
+pip install -e .                        # or: pip install https://gitlab.com/aa22396584/synology-nas-cli/-/archive/v1.0.0/synology-nas-cli-v1.0.0.tar.gz
+# on Windows:
+py -3 bin\nas --version
 ```
 
 ## Step 1: what the human provides
@@ -17,24 +19,26 @@ Ask once, together:
 
 | Value | Question to relay | Flag |
 |---|---|---|
-| DSM address | What is the NAS's DSM address, for example https://192.168.0.10:5001? | `--origin URL` (repeat for a VPN/Tailscale address) |
+| DSM address | What is the NAS's DSM address, for example https://192.0.2.10:5001? | `--origin URL` (repeat for a VPN/Tailscale address) |
 | Account | Which DSM account should the tool sign in with (an administrator account)? | `--user NAME` |
-| Password source | Where does the DSM password come from: a 1Password reference (op://vault/item/field), a command that prints it, or should it be stored in this computer's keychain? | `--password-source op:op://V/I/password` / `command:CMD` / `keychain` (+ `--save-to-keychain --password-stdin`, password on stdin) / `env` (`NAS_PASSWORD`) |
-| LAN range | Which network(s) should keep access to the NAS after the firewall is turned on, for example 192.168.0.0/24? | `--allowed-network CIDR` (repeatable) |
-| Staging folder (for `--deep`, `alert-deploy`) | Which shared folder can hold a temporary file, for example /docker? | `--stage-dir /SHARE/.nas-cli-deploy` |
+| Password source | Where does the DSM password come from: a 1Password reference (`op://VAULT/ITEM/password`), a command that prints it, or should it be stored in this computer's keychain? | `--password-source op:op://VAULT/ITEM/password` / `command:CMD` / `keychain` (+ `--save-to-keychain --password-stdin`, password on stdin) / `env` (`NAS_PASSWORD`) |
+| LAN range | Which network(s) should keep access to the NAS after the firewall is turned on, for example 192.0.2.0/24? | `--allowed-network CIDR` (repeatable) |
+| Staging folder (for `--deep`, `alert-deploy`) | Which shared folder can hold a temporary file, for example `/docker`? | `--stage-dir /SHARE/.nas-cli-deploy` |
 
 ## Step 2: setup
 
 ```bash
-nas setup --json --no-input --origin URL --user USER --password-source SOURCE --allowed-network CIDR --stage-dir PATH
+nas setup --json --no-input --origin https://192.0.2.10:5001 --user USER --password-source SOURCE --allowed-network 192.0.2.0/24 --stage-dir /SHARE/.nas-cli-deploy
 ```
+
+Additional `nas setup` options: `--otp-source {op,none}|command:CMD`, `--otp-code CODE`, `--trust-device`, `--save-to-keychain`, `--password-stdin`, `--tls {pin,verify}`, `--webhook-file PATH`, `--config PATH`.
 
 | Exit | JSON | Next |
 |---|---|---|
 | 0 | `{"config", "written": true, "origin", "account", "credentials", "tls": {"mode", "sha256"}, "login": "ok", "dsm", "next_steps"}` | Step 3 |
 | 3 | `{"missing": [{"field", "why", "ask_user"}], "config"}` | Relay every `ask_user`, run Step 2 again with the answers as flags. `field: otp`: run again with `--otp-code CODE --trust-device` |
 | 4 | `{"login": "failed: DSM login failed: code 400 ..."}` | One attempt was made. Ask the human to correct the password source, then Step 2 again |
-| 5 | AutoBlock (407) | Ask the human to remove this computer's address in Control Panel > Security > Protection > Allow/Block List (from another device), then Step 2 again |
+| 5 | AutoBlock (407) | Ask the human to remove this computer's address in Control Panel > Security > Protection > Allow/Block List (from another device, or via Mode 1 reset: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)), then Step 2 again |
 | 6 | NAS unreachable / not ready | Ask the human whether the NAS is on and this computer is on its LAN or VPN |
 | 7 | certificate changed | Ask the human whether the DSM certificate was replaced; if yes `nas trust --reset ORIGIN`, then Step 2 again |
 
@@ -68,9 +72,9 @@ nas incident fix --dry-run --json --ransom-scan        # the plan; --ransom-scan
 nas incident fix --yes --json --ransom-scan [--force-firewall] [--force-admin] [--upgrade] [--rotate-password]
 ```
 
-`{"before", "plan", "results": [{"fix", "target", "ok", "now"}], "after": [...]}`; exit 0 when every change was applied and read back and no FAIL is left. `--upgrade` installs the newest DSM (the NAS reboots, DSM answers exit 6 until it is back). `--rotate-password` writes a new random password to the 1Password item or keychain entry and changes it in DSM. `NAS_YES=1` or `assume_yes: true` in the config is the same as `--yes` for every command; `nas mcp --auto-confirm` the same for the MCP tools.
+`{"before", "plan", "results": [{"fix", "target", "ok", "now"}], "after": [...]}`; exit 0 when every change was applied and read back and no FAIL is left. `--upgrade` installs the newest DSM (the NAS reboots, DSM answers exit 6 until it is back; `nas upgrade --wait-only` waits for completion). `--rotate-password` writes a new random password to the 1Password item or keychain entry and changes it in DSM. `NAS_YES=1` or `assume_yes: true` in the config is the same as `--yes` for every command; `nas mcp --auto-confirm` the same for the MCP tools.
 
-If the firewall result is `ok: false`, its `now` text lists the ways back in: another computer on the NAS's LAN, Synology Assistant / find.synology.com, a Tailscale device (userspace mode reaches DSM as 127.0.0.1), or the RESET button (mode 1) at the NAS (a physical step for the human).
+If the firewall result is `ok: false`, its `now` text lists the ways back in: another computer on the NAS's LAN, Synology Assistant / find.synology.com, a Tailscale device (userspace mode reaches DSM as 127.0.0.1), or the RESET button (mode 1) at the NAS (a physical step for the human; see [TROUBLESHOOTING.md](TROUBLESHOOTING.md)).
 
 ## Step 6 (optional): indicators of compromise
 
@@ -87,7 +91,7 @@ nas setup --json --webhook-file ~/.config/synology-nas-cli/webhook.json     # {"
 nas alert-deploy --json --test
 ```
 
-Installs `nas alert --push` on the NAS as a root task every 10 minutes and points DSM's notification webhook at the same URL ([ALERTS.md](ALERTS.md)). Ask the human for the webhook URL and header (or a 1Password item holding them).
+Installs `nas alert --push` on the NAS as a root task every 10 minutes and points DSM's notification webhook at the same URL ([ALERTS.md](ALERTS.md)). Ask the human for the webhook URL and header (or a 1Password item holding them via `--webhook-item op://VAULT/ITEM`).
 
 ## What the human does, and when
 
@@ -96,7 +100,7 @@ Installs `nas alert --push` on the NAS as a root task every 10 minutes and point
 | Step 1 | DSM address, account, password source, LAN range, staging folder |
 | Step 2 exit 3 `otp` | the current 6-digit 2-step code (once; `--trust-device` keeps later logins code-free) |
 | 1Password desktop integration | approve the `op` request in the 1Password app (first use) |
-| Step 2 exit 5 | remove the AutoBlock entry from another device |
+| Step 2 exit 5 | remove the AutoBlock entry from another device (or Mode 1 reset) |
 | Step 5 | read the plan; the firewall rescue steps (physical access) if a result says the login failed afterwards |
-| Step 4/6 FAIL on `ransomware_files` / `ioc_*` | isolate the NAS (unplug the WAN side), per INCIDENT-C3RB3R.md |
+| Step 4/6 FAIL on `ransomware_files` / `ioc_*` | isolate the NAS (unplug the WAN side), per [INCIDENT-C3RB3R.md](INCIDENT-C3RB3R.md) |
 | Tailscale | open the URL from `nas tailscale login-url` in a browser and approve the device |
