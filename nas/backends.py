@@ -704,10 +704,19 @@ class PasswordBackend:
                  cookies: dict | None = None, timeout: float = 30) -> tuple[int, dict, str, dict]:
         """Request a DSM-hosted page with the session cookie (`id=<sid>`).
 
-        Returns (status, headers, body, cookies set by the response).
+        Returns (status, headers, body, cookies set by the response). A DSM error answer 106/107/119
+        (session dropped) is followed by one new login and the same request once more, as in call_many.
         """
         if not self._sid:
             self.login()
+        out = self._http_raw_once(path, data, headers, cookies, timeout)
+        code = _dsm_error_code(out[2])
+        if code in self.RENEW_CODES and self.session_kind in ("cache", "env", "login"):
+            self._renew(code)
+            out = self._http_raw_once(path, data, headers, cookies, timeout)
+        return out
+
+    def _http_raw_once(self, path, data, headers, cookies, timeout) -> tuple[int, dict, str, dict]:
         origin = self.select_origin()
         req = urllib.request.Request(origin + path, data=data, method="POST" if data is not None else "GET")
         jar = {"id": self._sid, **(cookies or {})}
@@ -737,6 +746,16 @@ class PasswordBackend:
             set_cookies[name.strip()] = rest.split(";", 1)[0]
         return resp.status if hasattr(resp, "status") else resp.code, dict(resp.headers), body, set_cookies
 
+
+def _dsm_error_code(body: str):
+    """The code of a DSM Web API error answer ({"error": {"code": N}, "success": false}), else None."""
+    if not body.lstrip().startswith("{") or '"error"' not in body[:200]:
+        return None
+    try:
+        d = json.loads(body)
+    except ValueError:
+        return None
+    return (d.get("error") or {}).get("code") if isinstance(d, dict) and d.get("success") is False else None
 
 LOGIN_HINTS = {
     400: "Check the username/password your credential source returns (`nas config show` names the source). "

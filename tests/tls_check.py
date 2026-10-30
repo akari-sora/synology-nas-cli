@@ -53,7 +53,11 @@ class H(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        body = json.dumps({"success": True, "data": {"ok": 1}}).encode()
+        if self.path.startswith("/renew-test") and ("id=fresh" not in (self.headers.get("Cookie") or "")
+                                                     or "always" in self.path):
+            body = b'{"error":{"code":119},"success":false}'  # DSM dropped the session
+        else:
+            body = json.dumps({"success": True, "data": {"ok": 1}}).encode()
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -110,6 +114,24 @@ for path, target in (("/share/map.bin", dl), ("/share/nope.bin", dl + "2")):
     except (FileExistsError, NasError):
         pass
 assert not os.path.exists(dl + "2")
+# http_raw (package pages, File Station download URL): DSM's 119 is followed by one new login and one retry
+renews = []
+
+
+def fake_renew(code):
+    renews.append(code)
+    b2._sid = "fresh"
+
+
+b2._renew, b2.session_kind, b2._sid = fake_renew, "login", "dropped"
+st, _h, body, _c = b2.http_raw("/renew-test")
+assert st == 200 and json.loads(body)["success"] and renews == [119], (body, renews)
+renews.clear()
+st, _h, body, _c = b2.http_raw("/renew-test/always")
+assert json.loads(body)["error"]["code"] == 119 and renews == [119], "renewed once, not in a loop"
+renews.clear()
+b2.http_raw("/x")
+assert renews == [], "no renewal on a good answer"
 # tls.verify true: the system CAs decide, and a self-signed certificate fails
 _env.use_config({"tls": {"verify": True, "known_certs_file": pins}})
 try:

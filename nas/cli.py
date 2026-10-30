@@ -412,7 +412,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "mcp":
         from .mcp import serve
         return serve(sys.stdin, sys.stdout, lambda: open_session(args.backend, origins, lan),
-                     auto_confirm=args.auto_confirm)
+                     auto_confirm=args.auto_confirm, lan_origins=lan)
     if args.cmd in NO_SESSION:
         try:
             if args.cmd == "config":

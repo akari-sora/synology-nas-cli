@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import sys
 import traceback
 
@@ -178,53 +179,74 @@ def _check_args(schema: dict, args) -> str | None:
 
 
 SETUP_FLAGS = {"origin": "--origin", "user": "--user", "password_source": "--password-source",
-               "otp_source": "--otp-source", "tls": "--tls", "allowed_network": "--allowed-network"}
+               "otp_source": "--otp-source", "tls": "--tls", "allowed_network": "--allowed-network",
+               "stage_dir": "--stage-dir", "webhook_file": "--webhook-file"}
 
 
-def setup_changes(a: dict) -> list:
-    """Arguments of the MCP setup tool that would change a value the config file already has."""
+def _networks(xs) -> list:
     import ipaddress
+    try:
+        return sorted(str(ipaddress.ip_network(x, strict=False)) for x in xs)
+    except ValueError:
+        return sorted(xs)
+
+
+def _current(cfg: dict, lan: list | None = None) -> dict:
+    """Setup field -> value in a config dict (the file, or the effective config); None = not set."""
+    cred, tls = cfg.get("credentials") or {}, cfg.get("tls") or {}
+    origins = [o.rstrip("/") for o in (lan or cfg.get("origins") or [])]
+    if cred.get("op_password"):
+        src = "op:" + cred["op_password"]
+    elif cred.get("password_command"):
+        src = "command:" + cred["password_command"]
+    else:
+        src = cred.get("source") if cred.get("source") not in (None, "", "auto") else None
+    otp = ("command:" + cred["otp_command"] if cred.get("otp_command") else
+           ("op" if cred["op_otp"] else "none") if "op_otp" in cred else None)
+    webhook = (cfg.get("webhook") or {}).get("file") or ""
+    return {"origin": origins or None,
+            "user": cred.get("username") or ("op:" + cred["op_username"] if cred.get("op_username") else None),
+            "password_source": src, "otp_source": otp,
+            "tls": ("verify" if tls["verify"] else "pin") if "verify" in tls else None,
+            "allowed_network": _networks(cfg.get("allowed_networks") or []) or None,
+            "stage_dir": ((cfg.get("deploy") or {}).get("stage_dir") or "").rstrip("/") or None,
+            "webhook_file": os.path.expanduser(webhook) if webhook else None}
+
+
+def setup_changes(a: dict, lan: list | None = None) -> list:
+    """Arguments of the MCP setup tool that would change a value already in effect: the server's
+    configuration (file, environment, --lan-origin) or the config file on disk."""
     from .onboard import _load_file
-    f = _load_file(config.config_path()[0])
-    cred = f.get("credentials") or {}
+    want = {}
+    if a.get("origin"):
+        o = [a["origin"]] if isinstance(a["origin"], str) else a["origin"]
+        want["origin"] = [x.strip().rstrip("/") for y in o for x in y.split(",") if x.strip()]
+    if a.get("user"):
+        want["user"] = a["user"]
+    if a.get("password_source"):
+        kind, _, value = a["password_source"].partition(":")
+        want["password_source"] = "op:" + value if kind == "op" else a["password_source"]
+    for k in ("otp_source", "tls"):
+        if a.get(k):
+            want[k] = a[k]
+    if a.get("allowed_network"):
+        want["allowed_network"] = _networks(a["allowed_network"])
+    if a.get("stage_dir"):
+        want["stage_dir"] = a["stage_dir"].rstrip("/")
+    if a.get("webhook_file"):
+        want["webhook_file"] = os.path.expanduser(a["webhook_file"])
     out = []
-    if a.get("origin") and f.get("origins"):
-        want = [a["origin"]] if isinstance(a["origin"], str) else a["origin"]
-        want = [o.strip().rstrip("/") for x in want for o in x.split(",") if o.strip()]
-        if want != [o.rstrip("/") for o in f["origins"]]:
-            out.append("origin")
-    if a.get("user") and (cred.get("username") or cred.get("op_username")) and a["user"] != cred.get("username"):
-        out.append("user")
-    src = a.get("password_source")
-    if src and (cred.get("op_password") or cred.get("password_command") or cred.get("source")):
-        kind, _, value = src.partition(":")
-        same = (kind == "op" and value == cred.get("op_password")) or (
-            kind in ("keychain", "env", "prompt") and cred.get("source") == kind and not cred.get("op_password")
-            and not cred.get("password_command"))
-        if not same:
-            out.append("password_source")
-    otp = a.get("otp_source")
-    if otp and (cred.get("op_otp") or cred.get("otp_command")):
-        if not (otp == "op" and cred.get("op_otp") and not cred.get("otp_command")):
-            out.append("otp_source")
-    if a.get("tls") and "verify" in (f.get("tls") or {}) and (a["tls"] == "verify") != bool(f["tls"]["verify"]):
-        out.append("tls")
-    if a.get("allowed_network") and f.get("allowed_networks"):
-        def norm(xs):
-            try:
-                return sorted(str(ipaddress.ip_network(x, strict=False)) for x in xs)
-            except ValueError:
-                return list(xs)
-        if norm(a["allowed_network"]) != norm(f["allowed_networks"]):
-            out.append("allowed_network")
+    for cur in (_current(config.get(), lan), _current(_load_file(config.config_path()[0]))):
+        out += [k for k, v in want.items() if cur.get(k) is not None and cur[k] != v and k not in out]
     return out
 
 
 class Server:
-    def __init__(self, session_factory, auto_confirm: bool = False):
+    def __init__(self, session_factory, auto_confirm: bool = False, lan_origins: list | None = None):
         self.session_factory = session_factory
         self.session = None
         self.auto_confirm = auto_confirm
+        self.lan_origins = lan_origins  # `nas mcp --lan-origin`: in effect for this server
 
     def _session(self):
         if self.session is None:
@@ -248,10 +270,11 @@ class Server:
                     flag = "--" + k.replace("_", "-")
                     return self._error(f"{k} command:... runs a local command; it is set with `nas setup {flag} "
                                        "command:...` on the command line. Through MCP: op:..., keychain or env.", 2)
-            changed = setup_changes(args)
+            changed = setup_changes(args, self.lan_origins)
             if changed:
-                return self._error("setup through MCP fills fields the config does not have yet; "
-                                   + ", ".join(changed) + " already set in " + config.config_path()[0]
+                return self._error("setup through MCP fills fields the configuration does not have yet; "
+                                   + ", ".join(changed) + " already set (config " + config.config_path()[0]
+                                   + ", environment or the server's --lan-origin)"
                                    + ". Change them with `nas setup` on the command line (e.g. `nas setup "
                                    + " ".join(SETUP_FLAGS[k] + " ..." for k in changed) + "`).", 2)
         argv = TOOLS[name][3](dict(args, _auto=self.auto_confirm))
@@ -327,10 +350,10 @@ def _rpc_error(mid, code: int, message: str) -> dict:
     return {"jsonrpc": "2.0", "id": mid, "error": {"code": code, "message": message}}
 
 
-def serve(infile, outfile, session_factory, auto_confirm: bool = False) -> int:
+def serve(infile, outfile, session_factory, auto_confirm: bool = False, lan_origins: list | None = None) -> int:
     """Answer requests from `infile` until EOF."""
     set_no_input(True)
-    server = Server(session_factory, auto_confirm)
+    server = Server(session_factory, auto_confirm, lan_origins)
 
     def send(m):
         outfile.write(json.dumps(m, ensure_ascii=False) + "\n")

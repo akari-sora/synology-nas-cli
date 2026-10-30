@@ -6,7 +6,7 @@ is part of this repository) with this CLI's own pieces:
   contain   freeze the encryptor processes (nas incident contain --yes) unless --no-contain
   toolkit   clone c3rb3r-rescue at incident.rescue_commit and verify the SHA (or --rescue-dir: a clean
             checkout at that commit; --force-unpinned-toolkit for any other)
-  capture   on the NAS as root: the toolkit's capture_process_memory.py `inspect` + `capture` for every
+  capture   on the NAS as root: the toolkit's capture_process_memory.py `inspect` + `capture` (run from stdin) for every
             frozen PID into a new case folder under --capture-dir (a different volume or USB disk than
             the encrypted data, compared by mount source; --force-same-volume for the same one); exe hash
             compared with the reviewed one; the case folder is handed to the signed-in DSM account
@@ -53,13 +53,12 @@ CAPTURE_TIMEOUT = 14400  # seconds for one process's capture
 INSPECT_TIMEOUT = 600
 
 CAPTURE = r'''
-import base64, glob, hashlib, json, os, re, subprocess, sys, time
+import base64, glob, hashlib, json, os, re, stat, subprocess, sys, time
 OUT, TOKEN, CFG = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
 R = CFG.get("root", "")
 RR = os.path.realpath(R) if R else ""
 res = {"marker": TOKEN, "version": 1, "errors": [], "captures": [], "case_dir": None, "same_volume": None,
        "capture_source": None, "owner": None}
-tool = None
 
 
 def full(p):
@@ -116,6 +115,43 @@ def source(p):
         return None
 
 
+def own_tree(path, uid, dir_fd=None):
+    # chown/chmod through file descriptors opened with O_NOFOLLOW: a symlink, or a folder or file swapped
+    # for one during the walk, is skipped and never followed. Returns the names left alone.
+    skipped = []
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+    except OSError:
+        return [path]
+    try:
+        os.fchown(fd, uid, -1)
+        os.fchmod(fd, (os.fstat(fd).st_mode & 0o777) | 0o700)
+        for name in os.listdir(fd):
+            st = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            if stat.S_ISDIR(st.st_mode):
+                skipped += [path + "/" + n for n in own_tree(name, uid, fd)]
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                skipped.append(path + "/" + name)
+                continue
+            try:
+                f = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+            except OSError:
+                skipped.append(path + "/" + name)
+                continue
+            try:
+                if stat.S_ISREG(os.fstat(f).st_mode):
+                    os.fchown(f, uid, -1)
+                    os.fchmod(f, (os.fstat(f).st_mode & 0o777) | 0o400)
+                else:
+                    skipped.append(path + "/" + name)
+            finally:
+                os.close(f)
+    finally:
+        os.close(fd)
+    return skipped
+
+
 try:
     cap = full(CFG["capture_dir"])
     if not resolves_to_itself(cap):
@@ -148,15 +184,13 @@ try:
                 raise ValueError("the staged capture tool's sha256 differs from the uploaded file")
         else:
             body = base64.b64decode(CFG["tool_b64"])
-        tool = os.path.join(case, ".capture_process_memory.py")
-        fd = os.open(tool, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
-        os.write(fd, body)
-        os.close(fd)
+        # the verified bytes run from stdin: no copy of the tool on disk between the check and the run
+        tool = [sys.executable, "-I", "-B", "-"]
         for pid in CFG["pids"]:
             item = {"pid": pid}
             res["captures"].append(item)
             try:
-                ins = subprocess.run([sys.executable, "-I", "-B", tool, "inspect", "--pid", str(pid)],
+                ins = subprocess.run(tool + ["inspect", "--pid", str(pid)], input=body,
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                      timeout=CFG.get("inspect_timeout", 600))
                 if ins.returncode != 0:
@@ -168,11 +202,11 @@ try:
                                    "threads": {k: v.get("state") for k, v in (info.get("threads") or {}).items()},
                                    "excluded_unaddressable": len(info.get("excluded_unaddressable") or [])}
                 out = os.path.join(case, "pid-%d" % pid)
-                c = subprocess.run([sys.executable, "-I", "-B", tool, "capture", "--pid", str(pid),
-                                    "--expected-start-ticks", str(info["start_ticks"]),
-                                    "--expected-exe-sha256", info["exe_sha256"],
-                                    "--expected-output-device", str(os.stat(case).st_dev), "--output", out],
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                c = subprocess.run(tool + ["capture", "--pid", str(pid),
+                                           "--expected-start-ticks", str(info["start_ticks"]),
+                                           "--expected-exe-sha256", info["exe_sha256"],
+                                           "--expected-output-device", str(os.stat(case).st_dev), "--output", out],
+                                   input=body, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    timeout=CFG.get("timeout", 14400))
                 item.update(exit=c.returncode, output=out, stderr=c.stderr.decode("utf-8", "replace")[-400:])
                 lines = [l for l in c.stdout.decode("utf-8", "replace").splitlines() if l.strip().startswith("{")]
@@ -183,8 +217,6 @@ try:
                         pass
             except Exception as e:
                 item["error"] = "%s: %s" % (type(e).__name__, e)
-        os.remove(tool)
-        tool = None
         owner = CFG.get("owner")
         if owner:
             # File Station lists and downloads as the signed-in account: the case folder becomes its own
@@ -193,17 +225,10 @@ try:
             if uid is None:
                 res["errors"].append("id -u %s: %s" % (owner, p.stderr.decode("utf-8", "replace").strip()[-200:]))
             else:
-                for dirpath, dirs, files in os.walk(case):
-                    for n in [dirpath] + [os.path.join(dirpath, f) for f in files]:
-                        if not os.path.islink(n):
-                            os.lchown(n, uid, -1)
-                            os.chmod(n, (os.stat(n).st_mode & 0o777) | (0o700 if n == dirpath else 0o400))
-                res["owner"] = {"name": owner, "uid": uid}
+                res["owner"] = {"name": owner, "uid": uid, "skipped": own_tree(case, uid)}
 except Exception as e:
     res["errors"].append("%s: %s" % (type(e).__name__, e))
 finally:
-    if tool and os.path.exists(tool):
-        os.remove(tool)
     if CFG.get("tool_path") and os.path.lexists(CFG["tool_path"]):
         os.remove(CFG["tool_path"])
     data = (json.dumps(res) + "\n").encode()

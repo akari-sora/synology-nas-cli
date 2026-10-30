@@ -65,8 +65,12 @@ json.dump({"schema": 1, "format": "linux-process-mappings", "exe_sha256": a.expe
            "regions": [{"start": 4096, "end": 8192, "file": "map-1000-2000.bin",
                         "sha256": hashlib.sha256(region).hexdigest(), "holes": []}]},
           open(os.path.join(a.output, "capture.json"), "w"))
+link = os.environ.get("STUB_LINK_TARGET")  # links the chown walk must leave alone
+if link:
+    os.symlink(link, os.path.join(a.output, "link-dir"))
+    os.symlink(os.path.join(link, "f"), os.path.join(a.output, "link-file"))
 print(json.dumps({"complete": True, "regions": 1, "selected_mappings_complete": True, "excluded_unaddressable": 0,
-                  "receipt": os.path.join(a.output, "capture.json")}))
+                  "receipt": os.path.join(a.output, "capture.json"), "argv0": sys.argv[0]}))
 ''')
 write(os.path.join(S, "recover_process_key.py"), r'''
 import argparse, json, os, sys
@@ -333,13 +337,24 @@ def run2(**kw):
     return lines, data, rc
 
 
-# USB disk: another mount source, so no override is needed (st_dev is the same here: one temp filesystem)
+# USB disk: another mount source, so no override is needed (st_dev is the same here: one temp filesystem).
+# The capture leaves symlinks to a folder outside the case: the chown/chmod walk does not follow them.
+OUT = os.path.join(T, "outside")
+write(os.path.join(OUT, "f"), "outside", mode=0o200)
+os.chmod(OUT, 0o500)
+os.environ["STUB_LINK_TARGET"] = OUT
 lines, data, rc = run2(workdir=os.path.join(T, "w10"), no_contain=True, pid=[202], keep_on_nas=True)
+del os.environ["STUB_LINK_TARGET"]
 c = data["steps"]["capture"]
 assert rc == 0 and c["status"] == "done" and not c["same_volume"] and c["capture_source"] == "/dev/sdq1", c
-assert c["owner"] == {"name": Sess2.backend.account, "uid": os.getuid()}, c["owner"]
+assert c["captures"][0]["summary"]["argv0"] == "-", "the verified tool runs from stdin"
 case_dir = R + "/volumeUSB1/usbshare/rescue/" + c["case"]
+assert c["owner"]["name"] == Sess2.backend.account and c["owner"]["uid"] == os.getuid(), c["owner"]
+assert sorted(os.path.basename(x) for x in c["owner"]["skipped"]) == ["link-dir", "link-file"], c["owner"]
+assert oct(os.stat(OUT).st_mode & 0o777) == "0o500" and oct(os.stat(os.path.join(OUT, "f")).st_mode & 0o777) == "0o200"
 assert os.stat(case_dir).st_uid == os.getuid() and os.stat(case_dir).st_mode & 0o700 == 0o700
+assert not [n for n in os.listdir(case_dir) if n.endswith(".py")], "no copy of the tool in the case folder"
+os.chmod(OUT, 0o700)
 # a shared folder on volume 1 and a separately mounted subvolume: both the volume's source
 for share in ("/docs/rescue", "/dockerdata/rescue"):
     lines, data, rc = run2(workdir=os.path.join(T, "w11" + share.replace("/", "-")), no_contain=True, pid=[202],

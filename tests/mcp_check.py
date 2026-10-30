@@ -10,6 +10,7 @@ import types
 import _env
 
 from nas import incident, mcp
+SETUP_FLAG_TEXT = mcp.SETUP_FLAGS
 from nas.commands import is_read_method
 from nas.errors import AuthFailed
 
@@ -167,7 +168,7 @@ assert "results" not in res and all(is_read_method(m) for _, m in sessions[0].se
 from nas import cli
 seen = []
 real_serve = mcp.serve
-mcp.serve = lambda i, o, f, auto_confirm=False: seen.append(auto_confirm) or 0
+mcp.serve = lambda i, o, f, auto_confirm=False, lan_origins=None: seen.append(auto_confirm) or 0
 cli.main(["mcp"])
 cli.main(["mcp", "--auto-confirm"])
 mcp.serve = real_serve
@@ -208,6 +209,26 @@ for cred, arg, val in (({"op_username": "op://V/I/username", "op_password": "op:
     json.dump({"credentials": cred}, open(cfgfile, "w"))
     r = mcp.Server(factory).call_tool("setup", {arg: val})
     assert r["isError"] and r["_meta"]["exit_code"] == 2 and arg in r["content"][0]["text"], (cred, r)
+# the configuration in effect counts too: environment / in-memory values and the server's --lan-origin
+from nas import config as nas_config
+json.dump({}, open(cfgfile, "w"))
+eff = nas_config.get()
+saved = (list(eff["origins"]), dict(eff["deploy"]), dict(eff["webhook"]), dict(eff["tls"]), dict(eff["credentials"]))
+eff["origins"] = ["https://192.0.2.20:5001"]
+eff["deploy"]["stage_dir"] = "/files/.nas-cli-deploy"
+eff["webhook"]["file"] = "~/webhook.json"
+for arg, val in (("origin", "https://192.0.2.21:5001"), ("stage_dir", "/other/.stage"),
+                 ("webhook_file", "/tmp/other.json"), ("tls", "verify"), ("otp_source", "none")):
+    r = mcp.Server(factory).call_tool("setup", {arg: val})
+    assert r["isError"] and r["_meta"]["exit_code"] == 2 and arg in r["content"][0]["text"], (arg, r)
+    assert SETUP_FLAG_TEXT[arg] in r["content"][0]["text"], r
+same = mcp.Server(factory).call_tool("setup", {"origin": "https://192.0.2.20:5001/", "stage_dir": "/files/.nas-cli-deploy/",
+                                               "webhook_file": os.path.expanduser("~/webhook.json"), "tls": "pin"})
+assert not same["isError"] and same["_meta"]["exit_code"] == 3, same  # same values pass; missing fields asked for
+eff["origins"] = []
+r = mcp.Server(factory, lan_origins=["https://192.0.2.30:5001"]).call_tool("setup", {"origin": "https://192.0.2.31:5001"})
+assert r["isError"] and "origin" in r["content"][0]["text"], r
+eff["origins"], eff["deploy"], eff["webhook"], eff["tls"], eff["credentials"] = saved
 dr = mcp.Server(factory).call_tool("doctor", {})
 assert dr["_meta"]["exit_code"] == 1 and "checks" in json.loads(dr["content"][0]["text"])
 _env.use_config({})
