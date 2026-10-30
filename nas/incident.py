@@ -668,6 +668,9 @@ def configured_v4() -> tuple:
         if net.prefixlen < 8:
             raise NasError(f"allowed_networks: {n!r} is a /{net.prefixlen}, wider than a /8; set the LAN or VPN "
                            "ranges, e.g. 192.168.0.0/24 (nas setup --allowed-network CIDR)")
+        if net.is_global and net.prefixlen < (24 if net.version == 4 else 48):
+            raise NasError(f"allowed_networks: {n!r} is a public range wider than a /{24 if net.version == 4 else 48}; "
+                           "allow your public address or office range itself (a /24 or narrower)")
         if net.version == 6:
             v6.append(str(net))
         elif net.is_loopback:

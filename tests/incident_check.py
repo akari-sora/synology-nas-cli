@@ -355,5 +355,15 @@ for wide in ("0.0.0.0/0", "10.0.0.0/7", "::/0"):
         assert repr(wide) in str(e)
 _env.use_config({"allowed_networks": ["10.0.0.0/8"]})
 assert [str(n) for n in incident.configured_v4()[0]] == ["10.0.0.0/8"]
+# public ranges: a /24 or narrower (an office or home address), nothing wider; private ranges of any size
+for wide in ("46.0.0.0/8", "1.2.0.0/16", "2a00:1450::/32"):
+    _env.use_config({"allowed_networks": [wide]})
+    try:
+        incident.configured_v4()
+        raise AssertionError(wide + " accepted")
+    except NasError as e:
+        assert repr(wide) in str(e) and "public range" in str(e), str(e)
+_env.use_config({"allowed_networks": ["1.2.3.0/24", "1.2.4.5/32", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]})
+assert len(incident.configured_v4()[0]) == 5
 _env.use_config({})
 print(f"incident checks ok (python {sys.version.split()[0]})")

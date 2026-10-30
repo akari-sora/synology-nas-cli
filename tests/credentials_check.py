@@ -223,10 +223,25 @@ b._http = dsm.http
 r = b.call_many(sysinfo)[0]
 assert not r["ok"] and r["error"]["code"] == 119 and len(dsm.logins) == 3
 
+from nas.errors import AuthFailed, Blocked
+# 119, then the new login is rejected (password changed meanwhile): the password is sent once, and every
+# later call in this process raises the same error without signing in again
+dsm = FakeDSM()
+b = backend(dsm, pw, use_cache=False)
+assert b.call_many(sysinfo)[0]["ok"]
+dsm.valid.clear()
+b.creds = creds({"username": "ops", "password_command": "x"}, Run({"x": (0, "changed\n")}))
+for _ in range(4):
+    try:
+        b.call_many(sysinfo)
+        raise AssertionError("rejected login accepted")
+    except AuthFailed as e:
+        assert "code 400" in str(e)
+assert [x["passwd"] for x in dsm.logins] == ["pw", "changed"], "one rejected login, not one per call"
+
 # wrong password: one attempt, no retry (AutoBlock counts every failure)
 dsm = FakeDSM()
 bad = creds({"username": "ops", "password_command": "x"}, Run({"x": (0, "wrong\n")}))
-from nas.errors import AuthFailed, Blocked
 try:
     backend(dsm, bad).call_many(sysinfo)
     raise AssertionError("wrong password accepted")

@@ -341,6 +341,7 @@ class PasswordBackend:
         self._info = None
         self._sid = None
         self._token = None
+        self._login_error = None  # a rejected login, raised again without sending anything
         self.session_kind = None  # "login" (this process), "cache" (nas login) or "env" (NAS_SID)
         self.trust_device = bool(self.cfg["session"].get("trust_device"))
         if use_cache:
@@ -529,7 +530,9 @@ class PasswordBackend:
 
     def login(self, save: bool = False) -> None:
         """Log in with the credential chain. Never retried with the same password:
-        each failure counts toward AutoBlock."""
+        each failure counts toward AutoBlock, so after one this process only raises it again."""
+        if self._login_error is not None:
+            raise self._login_error
         self.select_origin()
         info = self._api_info()["SYNO.API.Auth"]
         version = min(6, info["maxVersion"])
@@ -564,6 +567,7 @@ class PasswordBackend:
                       + describe_error("SYNO.API.Auth", {"error": r.get("error"), "version": version})
                       + (f"\n{hint}" if hint else ""))
             exc.code = code  # DSM's login error code (400, 403, 407, ...)
+            self._login_error = exc
             raise exc
         self.account = account
         self._sid = r["data"]["sid"]
