@@ -53,7 +53,7 @@ CAPTURE_TIMEOUT = 14400  # seconds for one process's capture
 INSPECT_TIMEOUT = 600
 
 CAPTURE = r'''
-import base64, glob, json, os, re, subprocess, sys, time
+import base64, glob, hashlib, json, os, re, subprocess, sys, time
 OUT, TOKEN, CFG = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
 R = CFG.get("root", "")
 RR = os.path.realpath(R) if R else ""
@@ -140,9 +140,17 @@ try:
         case = os.path.join(cap, CFG["case"])
         os.mkdir(case, 0o700)
         res["case_dir"] = case
+        if CFG.get("tool_path"):  # uploaded to the staging folder: used only if its hash matches
+            fd = os.open(CFG["tool_path"], os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(fd, "rb") as f:
+                body = f.read()
+            if hashlib.sha256(body).hexdigest() != CFG["tool_sha256"]:
+                raise ValueError("the staged capture tool's sha256 differs from the uploaded file")
+        else:
+            body = base64.b64decode(CFG["tool_b64"])
         tool = os.path.join(case, ".capture_process_memory.py")
         fd = os.open(tool, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
-        os.write(fd, base64.b64decode(CFG["tool_b64"]))
+        os.write(fd, body)
         os.close(fd)
         for pid in CFG["pids"]:
             item = {"pid": pid}
@@ -196,6 +204,8 @@ except Exception as e:
 finally:
     if tool and os.path.exists(tool):
         os.remove(tool)
+    if CFG.get("tool_path") and os.path.lexists(CFG["tool_path"]):
+        os.remove(CFG["tool_path"])
     data = (json.dumps(res) + "\n").encode()
     if OUT == "-":
         sys.stdout.buffer.write(data)
@@ -389,6 +399,27 @@ def step_toolkit(args, wd):
                      reviewed_sha256={"packed": prof.get("packed_sha256"), "unpacked": prof.get("unpacked_sha256")})
 
 
+def _stage_file(s, name: str, body: bytes) -> tuple:
+    """Upload `body` as deploy.stage_dir/name; (File Station path, path on the NAS's disk)."""
+    import tempfile
+    from .selfmon import _stage
+    stage, stage_fs = _stage(s)
+    s.call("SYNO.FileStation.CreateFolder", "create", version=2, params={
+        "folder_path": json.dumps([stage.rsplit("/", 1)[0] or "/"]), "name": json.dumps([stage.rsplit("/", 1)[1]]),
+        "force_parent": True})
+    tmpdir = tempfile.mkdtemp(prefix="nas-rescue-")
+    try:
+        with open(os.path.join(tmpdir, name), "wb") as f:  # File Station keeps the local file name
+            f.write(body)
+        up = s.upload("SYNO.FileStation.Upload", "upload", 2,
+                      {"path": stage, "create_parents": "true", "overwrite": "true"}, os.path.join(tmpdir, name))
+    finally:
+        shutil.rmtree(tmpdir)
+    if not up.get("ok"):
+        raise NasError(f"upload to {stage} failed: {up.get('error')}")
+    return f"{stage}/{name}", f"{stage_fs}/{name}"
+
+
 def step_capture(s, args, wd, root):
     tk = wd.done("toolkit")
     pids = sorted(set((wd.done("contain") or {}).get("frozen", []) + list(args.pid or [])))
@@ -402,10 +433,21 @@ def step_capture(s, args, wd, root):
     owner = getattr(getattr(s, "backend", None), "account", None) if s.backend_name == "password" else None
     cfg = {"root": root, "capture_dir": real, "case": case, "pids": pids,
            "force": forced(args, "force_same_volume"), "owner": owner,
-           "affected_paths": (wd.done("contain") or {}).get("evidence", []), "tool_b64": base64.b64encode(tool).decode(),
+           "affected_paths": (wd.done("contain") or {}).get("evidence", []),
            "timeout": CAPTURE_TIMEOUT, "inspect_timeout": INSPECT_TIMEOUT}
-    d = run_root_python(s, CAPTURE, cfg, "nas-incident-rescue", "capture script", root=root,
-                        timeout=len(pids) * (CAPTURE_TIMEOUT + INSPECT_TIMEOUT) + 600)
+    staged = None
+    if s.backend_name == "local" or root:
+        cfg["tool_b64"] = base64.b64encode(tool).decode()
+    else:  # DSM refuses long task scripts (4803): the tool goes through the staging folder, checked by sha256
+        staged, cfg["tool_path"] = _stage_file(s, f"nas-rescue-tool-{secrets.token_hex(6)}.py", tool)
+        cfg["tool_sha256"] = hashlib.sha256(tool).hexdigest()
+    try:
+        d = run_root_python(s, CAPTURE, cfg, "nas-incident-rescue", "capture script", root=root,
+                            timeout=len(pids) * (CAPTURE_TIMEOUT + INSPECT_TIMEOUT) + 600)
+    finally:
+        if staged:
+            s.call("SYNO.FileStation.Delete", "start", version=2, params={"path": json.dumps([staged]),
+                                                                          "recursive": False})
     if d.get("errors") and not d.get("case_dir"):
         return wd.record("capture", "failed", errors=d["errors"], message="; ".join(clean(e, 200) for e in d["errors"]))
     if d.get("same_volume") and not forced(args, "force_same_volume"):
@@ -539,7 +581,8 @@ def step_keys(args, wd):
                       "--profile", os.path.join(tk["path"], PROFILE), "--output", out], timeout=1800)
             info = _last_json(r.stdout) if r.returncode == 0 else None
             if info is None:
-                cands.append({"pid": p["pid"], "ok": False, "error": clean((r.stderr or r.stdout)[-300:], 300)})
+                last = ((r.stderr or r.stdout or "").strip().splitlines() or [""])[-1]  # the exception line
+                cands.append({"pid": p["pid"], "ok": False, "error": clean(last, 300)})
                 continue
         cands.append({"pid": p["pid"], "ok": True, "file": os.path.join(out, info.get("candidate_file", "master-candidate.bin")),
                       "capture_complete": info.get("capture_complete"), "validation": info.get("validation")})

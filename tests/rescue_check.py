@@ -276,6 +276,19 @@ assert rc == 1 and data["failed_step"] == "venv" and v["unknown_pins"] == ["nump
 assert "--force-unpinned-toolkit" in v["message"] and not os.path.exists(os.path.join(T, "w7", "requirements-hashed.txt"))
 cfg()
 
+# a process that is not the reviewed encryptor: the key search reports the toolkit's exception line
+TK4 = os.path.join(T, "toolkit-otherprofile")
+shutil.copytree(TK, TK4)
+write(os.path.join(TK4, "skills/dsm-ransomware-rescue/assets/libgld-802ac85d.json"),
+      json.dumps({"packed_sha256": "1" * 64, "unpacked_sha256": "2" * 64}))
+git4 = lambda *a: subprocess.run(["git", "-C", TK4] + list(a), capture_output=True, text=True, check=True).stdout.strip()
+git4("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-am", "other profile")
+cfg(rescue_commit=git4("rev-parse", "HEAD"))
+lines, data, rc = run(workdir=os.path.join(T, "w7b"), no_contain=True, pid=[202], force_same_volume=True, rescue_dir=TK4)
+k = data["steps"]["keys"]
+assert rc == 1 and k["candidates"][0]["error"] == "ValueError: Executable does not match the reviewed sample profile", k
+cfg()
+
 # --- pull: free space in the workdir is checked first -------------------------------------------------------
 real_usage = rescue.shutil.disk_usage
 rescue.shutil.disk_usage = lambda p: types.SimpleNamespace(total=1 << 30, used=1 << 30, free=1024)
@@ -342,6 +355,20 @@ assert rc == 1 and any("symlink" in e for e in c["errors"]), c
 # the local walk leaves symlinks out
 os.symlink("/etc/hosts", case_dir + "/pid-202/link-out")
 assert all(not rel.endswith("link-out") for rel, _f, _r in rescue.NasFiles(Sess(), R).walk(case_dir + "/pid-202", "/x"))
+
+# the tool staged as a file (how --backend password passes it, task scripts being short): used when its
+# sha256 matches the uploaded bytes, removed either way
+tool_bytes = open(os.path.join(S, "capture_process_memory.py"), "rb").read()
+staged = R + "/volume1/docker/.stage/nas-rescue-tool-1.py"
+base = {"root": R, "capture_dir": R + "/volumeUSB1/usbshare/rescue", "pids": [202], "force": False, "owner": None,
+        "affected_paths": [], "timeout": 60, "inspect_timeout": 60, "tool_path": staged,
+        "tool_sha256": hashlib.sha256(tool_bytes).hexdigest()}
+write(staged, tool_bytes)
+d = rescue.run_root_python(Sess(), rescue.CAPTURE, dict(base, case="case-staged-ok"), "t", "capture script", root=R)
+assert d["captures"][0]["exit"] == 0 and not d["errors"] and not os.path.exists(staged), d
+write(staged, tool_bytes + b"# changed after the upload\n")
+d = rescue.run_root_python(Sess(), rescue.CAPTURE, dict(base, case="case-staged-bad"), "t", "capture script", root=R)
+assert any("sha256 differs" in e for e in d["errors"]) and not d["captures"] and not os.path.exists(staged), d
 
 # CLI parsing
 from nas import cli

@@ -232,6 +232,7 @@ Error codes come from two layers: common session/dispatcher codes (`100`–`150`
 2. **Download and install the latest `.pat` with `nas upgrade`:**
    ```bash
    nas upgrade                         # downloads the newest .pat from Synology's download API and runs PreCheck
+                                       # (with NAS_YES=1 or config assume_yes: installs and reboots, as --yes)
    nas upgrade --yes                   # downloads, runs PreCheck, installs, and reboots
    ```
    Or download the `.pat` file manually from [Synology Download Center](https://www.synology.com/en-global/support/download) and apply it via `Control Panel > Update & Restore > DSM Update > Manual DSM Update` (`手動更新 DSM`) or `nas upgrade --pat /path/to/DSM.pat --yes`.

@@ -40,6 +40,8 @@ Error codes (common / `SYNO.API.Auth`):
 - Script tasks that exit non-zero are marked failed (and DSM may mail about it): end scripts with `exit 0` when a non-zero status is not an error.
 - `SYNO.Core.TaskScheduler run` **version 2** with `tasks=[{"id": N, "real_owner": "root"}]` runs a task now. Version 1 answers success and does not run it. Tasks whose `can_run` is false in `list` still run this way.
 - `SYNO.Core.TaskScheduler delete` v2 `tasks=[{"id": N, "real_owner": "root"}]`.
+- `SYNO.Core.TaskScheduler.Root create` answered 4803 for a task script of about 18.7 KB (a 11 KB Python file carried inline as base64); scripts of 4-5 KB are accepted. `incident rescue` uploads the capture tool to `deploy.stage_dir` with File Station and the root script checks its sha256 instead.
+- Shared folders on a Btrfs volume are subvolumes: each has its own `st_dev` (in testing `/volume1` 38 and three shared folders on it 39, 41 and 42), while `/proc/self/mountinfo` shows the same mount source (`/dev/mapper/cachedev_N`) for the volume and its subvolume mounts.
 
 ## Firewall
 

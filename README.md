@@ -182,7 +182,7 @@ Example ([`config.example.json`](config.example.json), what `nas config init` wr
 | `tls.verify` | `false` | `true`: check DSM's certificate against the system CAs (a real certificate for the origin's name). `false` (DSM ships a self-signed certificate): trust on first use, see [TLS](#tls). |
 | `tls.known_certs_file` | `~/.config/synology-nas-cli/known-certs.json` | SHA-256 of the certificate each origin presented first (mode 600). `nas trust` lists it, `nas trust --reset ORIGIN` forgets one. |
 | `lan_ip` / `public_ip` | `""` | Targets for `exposure` and `incident --probe`. `lan_ip` defaults to the host of the first origin. `public_ip` is only needed when the NAS does not dial PPPoE itself (behind a router: the router's WAN address). |
-| `allowed_networks` | `[]` | Sign-ins from these are expected (`alert`, `incident`); empty = every non-global address (RFC 1918, 100.64.0.0/10, loopback, link-local, IPv6 ULA). For `incident fix` these IPv4 networks plus this computer's address (as DSM logged it, `/32`) are what the firewall and AutoBlock allow; empty = this computer only. IPv6 entries are not written as firewall rules. |
+| `allowed_networks` | `[]` | Sign-ins from these are expected (`alert`, `incident`); empty = every non-global address (RFC 1918, 100.64.0.0/10, loopback, link-local, IPv6 ULA). For `incident fix` these IPv4 networks plus this computer's address (as DSM logged it, `/32`) are what the firewall and AutoBlock allow; empty = this computer only. IPv6 entries are not written as firewall rules. Entries wider than a /8 (for example `0.0.0.0/0`) stop `incident fix`'s firewall and AutoBlock changes with the entry named. |
 | `snapshot_shares` | `[]` | Shares whose scheduled snapshots `alert` watches. `incident` checks every share when empty. |
 | `snapshot_max_age_hours` | `26` | A scheduled snapshot older than this is "stale". |
 | `latest_dsm` | `""` | Newest build you expect for this model (e.g. `7.4.1-90080`); empty skips the `dsm_behind` alert. |
@@ -273,15 +273,23 @@ While files are being encrypted, `nas incident contain --yes` is the first comma
 `nas incident rescue` does the memory capture and key recovery with [soimy/c3rb3r-rescue](https://github.com/soimy/c3rb3r-rescue), fetched at run time at the commit in `incident.rescue_commit`:
 
 1. `contain`: the freeze above (`--no-contain` skips it).
-2. `toolkit`: clones the toolkit and checks the commit (or uses `--rescue-dir`).
-3. `capture`: as root on the NAS (temporary Task Scheduler task, or directly with `--backend local`), the toolkit's `capture_process_memory.py inspect` and `capture` for each frozen PID into a new case folder under `--capture-dir`. That folder has to be on a USB disk or another volume than the affected data (`--force` for the same volume).
-4. `pull`: downloads the capture to the workdir on this computer (`--keep-on-nas` stops after the capture).
-5. `venv`: a venv with the toolkit's pinned requirements (Python `incident.rescue_min_python`, 3.11, or `--python`) and its self-tests.
-6. `keys`: `recover_process_key.py` on each capture; candidates are files with mode 400, never printed.
+2. `toolkit`: clones the toolkit and checks the commit. `--rescue-dir DIR` uses an existing checkout when `git status --porcelain` is empty and HEAD is that commit (`--force-unpinned-toolkit` for any other).
+3. `capture`: as root on the NAS (temporary Task Scheduler task, or directly with `--backend local`), the toolkit's `capture_process_memory.py inspect` and `capture` for each frozen PID into a new case folder under `--capture-dir`. The folder has to be on a USB disk or another volume than the affected data; volumes are compared by mount source in `/proc/self/mountinfo` (every Btrfs shared folder is its own subvolume with its own device number, so device numbers do not tell volumes apart); `--force-same-volume` captures onto the same volume. A `--capture-dir` with a symlink in its path is refused. With `--backend password` the capture tool goes through `deploy.stage_dir` (DSM answers 4803 to a task script that carries it inline) and runs only if its sha256 matches the uploaded file. The case folder is then handed to the signed-in DSM account (`id -u`, `chown`) so File Station can list and download it.
+4. `pull`: downloads the capture to the workdir on this computer after checking free space there (the capture's readable bytes plus 256 MiB); with `--backend local` a workdir on the NAS's system partition is refused. `--keep-on-nas` stops after the capture.
+5. `venv`: a venv (Python `incident.rescue_min_python`, 3.11, or `--python`) with the toolkit's requirements installed by `pip --require-hashes`: the sha256 of every PyPI file of numpy 2.3.5, cryptography 50.0.2, cffi 2.1.1 and pycparser 3.12 is kept in `nas/rescue.py` for the pinned commit; other pins install without hash checks with `--force-unpinned-toolkit`. Then the toolkit's self-tests.
+6. `keys`: `recover_process_key.py` on each capture; candidates are files with mode 400, never printed. A process that is not the reviewed encryptor stops here with `ValueError: Executable does not match the reviewed sample profile`.
 7. `sample` (`--sample NAS_FILE [--expected-sha256 HEX]`): copies the file and tries each candidate on the copy.
-8. `decrypt` (`--decrypt-from NAS_FOLDER --decrypt-to DIR`): decrypts copies with the verified candidate.
+8. `decrypt` (`--decrypt-from NAS_FOLDER --decrypt-to DIR`): decrypts copies with the verified candidate (`--force-unverified-key`: the first candidate when no `--sample` verified one).
 
-Each step is recorded in `<workdir>/state.json` (`--workdir`, default `~/.local/share/synology-nas-cli/rescue/<time>`); the same command continues where it stopped. On the NAS it writes only the capture folder. JSON: [`schemas/incident-rescue.schema.json`](schemas/incident-rescue.schema.json).
+`--force` turns on `--force-same-volume`, `--force-unverified-key` and `--force-unpinned-toolkit` together.
+
+Each step is recorded in `<workdir>/state.json` (`--workdir`, default `~/.local/share/synology-nas-cli/rescue/<time>`); the same command continues where it stopped. What it writes on the NAS:
+
+- the case folder `--capture-dir/case-<time>-<random>/pid-N` (kept; owned by the signed-in account; delete it when the capture is safe elsewhere), with `.capture_process_memory.py` inside while the capture runs. On a shared folder with Windows ACL (the DSM default) access follows the share's ACL: folders created with mode 0700 were listed as 0755 in testing.
+- with `--backend password`: the uploaded tool `deploy.stage_dir/nas-rescue-tool-<random>.py` and the result file `deploy.stage_dir/nas-incident-rescue-<token>.json`, both deleted after the run, and the temporary root task `nas-incident-rescue`, deleted after the run.
+- the `contain` step: the temporary task `nas-incident-contain` and its result file (deleted), and the freeze's state file `incident.contain_state_file` (`/root/.nas-incident-contain.json`), removed by `nas incident contain --release`.
+
+JSON: [`schemas/incident-rescue.schema.json`](schemas/incident-rescue.schema.json).
 
 If the audit shows `ransomware_files FAIL` or `external_signins FAIL` you are past hardening: follow [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md) (isolate first, keep evidence, restore from snapshots).
 
@@ -320,7 +328,7 @@ claude mcp add synology-nas --scope user -- /path/to/synology-nas-cli/bin/nas mc
 claude mcp add synology-nas --scope user -- /path/to/synology-nas-cli/bin/nas mcp --auto-confirm
 ```
 
-`incident_fix` applies its plan when a call has `confirm: true`, or has no `confirm` on a server started with `--auto-confirm`; `confirm: false` is always a dry run. `NAS_YES` and `assume_yes` do not change MCP calls. The `setup` tool takes `op:`, `keychain` and `env` credential sources; `command:` sources are set with `nas setup` on the command line. Fields such as `user`, `descr`, log `text`, `cmdline` and file names carry text chosen by whoever sends sign-ins to the NAS or runs processes on it.
+`incident_fix` applies its plan when a call has `confirm: true`, or has no `confirm` on a server started with `--auto-confirm`; `confirm: false` is always a dry run. `NAS_YES` and `assume_yes` do not change MCP calls. The `setup` tool fills fields the config does not have yet and takes `op:`, `keychain` and `env` credential sources; changing an existing `origins`, `user`, `password_source`, `otp_source`, `tls` or `allowed_networks`, and `command:` sources, go through `nas setup` on the command line (the tool answers exit 2 naming the field). Fields such as `user`, `descr`, log `text`, `cmdline` and file names carry text chosen by whoever sends sign-ins to the NAS or runs processes on it.
 
 Full tool list, schemas and configuration for Claude Code, Claude Desktop, Cursor and Codex: [`docs/MCP.md`](docs/MCP.md).
 
@@ -472,7 +480,7 @@ tests/smoke_live.sh       # optional: read-only commands against your NAS (uses 
 - `nas incident contain`：列出疑似加密程式的程序（`libgld`、`qnetd`、從暫存資料夾執行的程式、以寫入模式開著 `*.L0CK3D` 或 `read-me3.txt` 的程序）。沒加 `--yes`／`NAS_YES=1` 時不送任何訊號。執行檔在 Synology 路徑下的程序，除了開著的檔案之外還需要另一個理由才會列入（列在 `skipped`，附上加入用的 `--pid`）。PID 1、核心執行緒、掃描腳本本身與其上層程序一律不送訊號（`--pid` 也一樣）。
 - `nas incident contain --yes --stop-sync`：對掃描列出的程序（PID、啟動時間、執行檔都相同者）送 `SIGSTOP`（所有執行緒，逐一確認狀態為 `T`），讓金鑰留在記憶體裡；同時停止執行中的 Cloud Sync、Synology Drive、Hyper Backup 和 Container Manager 套件（停止 Container Manager 會停止所有容器），停掉的套件記錄在本機工作階段快取旁的 `contain-packages.json`。
 - `--save-exe DIR` 另存執行檔與 sha256；`nas incident contain --release` 對記錄的 PID 送 `SIGCONT`，並啟動 `--stop-sync` 停掉的套件（容器依各自的重新啟動原則回來）。
-- `nas incident rescue --yes --capture-dir /usbshare1/rescue`：用 [soimy/c3rb3r-rescue](https://github.com/soimy/c3rb3r-rescue)（執行時依 `incident.rescue_commit` 下載）一路做完：凍結 → 取得工具並核對 commit → 在 NAS 上以 root 對每個凍結的 PID 執行 `capture_process_memory.py`，寫到 `--capture-dir` 底下的新資料夾（須在 USB 硬碟或與受害資料不同的磁碟區，同一磁碟區要加 `--force`）→ 下載到本機 → 建 venv、安裝固定版本套件並跑自我測試 → `recover_process_key.py` 找出金鑰候選（檔案權限 400，不會印出）。`--sample 檔案` 在副本上逐一試候選金鑰，`--decrypt-from 資料夾 --decrypt-to 目錄` 解密副本。每一步記錄在工作目錄的 `state.json`，同一個指令再跑一次會從中斷處繼續。
+- `nas incident rescue --yes --capture-dir /usbshare1/rescue`：用 [soimy/c3rb3r-rescue](https://github.com/soimy/c3rb3r-rescue)（執行時依 `incident.rescue_commit` 下載）一路做完：凍結 → 取得工具並核對 commit → 在 NAS 上以 root 對每個凍結的 PID 執行 `capture_process_memory.py`，寫到 `--capture-dir` 底下的新資料夾（須在 USB 硬碟或與受害資料不同的磁碟區，以 `/proc/self/mountinfo` 的掛載來源比對；同一磁碟區要加 `--force-same-volume`；路徑中有符號連結會被拒絕），完成後資料夾交給登入的 DSM 帳號（chown），File Station 才能列出與下載 → 檢查工作目錄空間後下載到本機 → 建 venv、以 `pip --require-hashes` 安裝固定版本套件並跑自我測試 → `recover_process_key.py` 找出金鑰候選（檔案權限 400，不會印出）。`--sample 檔案` 在副本上逐一試候選金鑰，`--decrypt-from 資料夾 --decrypt-to 目錄` 解密副本（沒有驗證過的候選金鑰時用 `--force-unverified-key`）。`--rescue-dir` 須是乾淨且在固定 commit 的工具副本（否則 `--force-unpinned-toolkit`）。`--force` 等於三個 `--force-*` 全開。每一步記錄在工作目錄的 `state.json`，同一個指令再跑一次會從中斷處繼續。
 
 ### 安裝與環境設定
 
