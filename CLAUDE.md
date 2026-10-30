@@ -16,7 +16,7 @@
 - `nas/mcp.py`: `nas mcp` (stdio MCP server; tools build CLI argv and call the same command functions). `nas/errors.py`: `NasError` subclasses with `exit_code` ([docs/EXIT-CODES.md](docs/EXIT-CODES.md)) and the `--no-input` switch (`can_prompt`).
 - `schemas/`: JSON Schemas of `--json` outputs, checked by `tests/schema_check.py`; update them when an output changes.
 - `nas/alert.py` (`alert`, `--push`), `nas/selfmon.py` (`alert-deploy`), `nas/upgrade.py`, `nas/manage.py` (`pkg`, `volume`, `tailscale`), `nas/advisories.py` (SA-26:13 / SA-26:14 tables).
-- `docs/`: `AGENT-RUNBOOK.md`, `INCIDENT-C3RB3R.md`, `HARDENING.md`, `TROUBLESHOOTING.md`, `ALERTS.md`, `DSM-API-NOTES.md`, `MCP.md`, `EXIT-CODES.md`.
+- `docs/`: `AGENT-RUNBOOK.md`, `INCIDENT-C3RB3R.md`, `HARDENING.md`, `TROUBLESHOOTING.md`, `ALERTS.md`, `DSM-API-NOTES.md`, `MCP.md`, `EXIT-CODES.md`, `GROK-BOT.md`.
 - `skills/`: agent skills (`synology-nas/SKILL.md`, `synology-ransomware-response/SKILL.md`) and installers (`install.sh`, `install.ps1`).
 - `tests/`: offline checks (`*_check.py`, shared setup in `_env.py`, fake DSM in `fakenas.py`, `install_check.sh` for `skills/install.sh`), `run_offline.sh`, optional `smoke_live.sh`.
 

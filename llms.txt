@@ -24,6 +24,8 @@
 
 ## Reference and repository layout
 
+- [docs/GROK-BOT.md](docs/GROK-BOT.md): Grok Bot setup: `nas` on the bot's cloud computer over Tailscale or on a computer with the Grok Bot app, skills via `gbot skills add`, routine webhook alerts, and an example bot description
+
 - [docs/ALERTS.md](docs/ALERTS.md): `nas alert` codes, `--push` webhook payload, receivers, and `nas alert-deploy`
 - [docs/DSM-API-NOTES.md](docs/DSM-API-NOTES.md): DSM 7 Web API quirks (SynoToken query param, JSON double encoding, `synowebapi`, TaskScheduler v2, WORM trap, firewall profiles)
 - [CLAUDE.md](CLAUDE.md): codebase architecture and conventions (`AGENTS.md` is a symlink to `CLAUDE.md`)

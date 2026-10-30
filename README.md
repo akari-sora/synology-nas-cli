@@ -28,7 +28,7 @@ Not affiliated with Synology Inc. "Synology", "DSM" and "QuickConnect" are trade
 
 ## Hand it to your agent
 
-Paste either prompt into Claude Code, Codex, Cursor, Gemini CLI, OpenCode, or any tool-using AI agent:
+Paste either prompt into Claude Code, Codex, Cursor, Gemini CLI, OpenCode, Grok Bot, or any tool-using AI agent (Grok Bot setup, skills and alert routine: [`docs/GROK-BOT.md`](docs/GROK-BOT.md)):
 
 **English prompt:**
 
@@ -391,6 +391,7 @@ nas mcp [--auto-confirm]                                      # MCP server on st
 - [`docs/HARDENING.md`](docs/HARDENING.md) — Synology DSM security hardening checklist with sourced explanations, English / 繁體中文 DSM UI paths, and matching `nas` commands.
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — Solutions for firewall/AutoBlock/2FA lockouts, Mode 1 reset, reverse proxies and Tailscale `127.0.0.1`, unsupported WORM models, Google Drive 750 GB/day quota, SMB1 devices, DSM API error codes, "up to date" branch traps, and TLS pin resets.
 - [`docs/MCP.md`](docs/MCP.md) — MCP server tools, arguments, schemas, and client setup.
+- [`docs/GROK-BOT.md`](docs/GROK-BOT.md) — Grok Bot: `nas` on the bot's cloud computer (Tailscale) or on a computer with the Grok Bot app, skills, the alert routine webhook, and a bot description.
 - [`docs/ALERTS.md`](docs/ALERTS.md) — Alert codes, webhook payload, receivers, and deployment (`alert-deploy`, manual DSM task, cron/launchd).
 - [`docs/DSM-API-NOTES.md`](docs/DSM-API-NOTES.md) — DSM 7 Web API quirks and parameter encoding rules relied on by `nas`.
 - [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md) — CLI and MCP `_meta.exit_code` definitions (`0`–`7`, `130`).
@@ -423,7 +424,7 @@ tests/smoke_live.sh       # optional: read-only commands against your NAS (uses 
 
 ### 交給 AI Agent 自動執行
 
-把以下提示詞貼給 Claude Code、Codex、Cursor、Gemini CLI 或任何支援工具呼叫的 AI Agent：
+把以下提示詞貼給 Claude Code、Codex、Cursor、Gemini CLI、Grok Bot 或任何支援工具呼叫的 AI Agent（Grok Bot 的雲端電腦／裝了 App 的電腦怎麼跑 `nas`、skills、警報例行任務：[`docs/GROK-BOT.md`](docs/GROK-BOT.md)）：
 
 ```text
 使用 https://github.com/akari-sora/synology-nas-cli 檢查並修復我的 Synology NAS（位址：https://192.0.2.10:5001），照著 docs/AGENT-RUNBOOK.md 的步驟執行。
@@ -510,6 +511,7 @@ py -3 -m pip install -e .
 - **MCP 伺服器**：執行 `nas mcp` 啟動 stdio MCP 伺服器（詳見 [`docs/MCP.md`](docs/MCP.md)）。
 - **Skills 安裝器**：執行 `./skills/install.sh`（Windows 為 `.\skills\install.ps1`）將 `synology-nas` 與 `synology-ransomware-response` 安裝至各 AI Agent 的技能目錄（支援 `--copy`、`--dry-run`、`--uninstall`）。
 - **排程監控與 Webhook**：`nas alert --push webhook.json` 僅在狀態變化、警告持續滿 24 小時或每日一次心跳時發送 POST；`nas alert-deploy --test` 可一鍵部署至 NAS 以 root 每 10 分鐘執行，並同步設定 DSM 內建通知 Webhook（詳見 [`docs/ALERTS.md`](docs/ALERTS.md)）。
+- **Grok Bot**：`nas` 可以跑在 Bot 的雲端電腦（透過 Tailscale 連 NAS），或裝了 Grok Bot App 的電腦；skills 用 `gbot skills add` 加入，警報接到 Bot 的例行任務 webhook（詳見 [`docs/GROK-BOT.md`](docs/GROK-BOT.md)）。
 - **更多文件**：[`docs/AGENT-RUNBOOK.md`](docs/AGENT-RUNBOOK.md)、[`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md)、[`docs/HARDENING.md`](docs/HARDENING.md)、[`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)、[`docs/DSM-API-NOTES.md`](docs/DSM-API-NOTES.md)、[`docs/EXIT-CODES.md`](docs/EXIT-CODES.md)。
 
 ## License
