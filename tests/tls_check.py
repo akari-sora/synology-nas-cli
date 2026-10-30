@@ -39,8 +39,20 @@ def make_cert(name):
     return crt, key
 
 
+BLOB = bytes(range(256)) * 4096  # 1 MiB of binary
+
+
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
+        if "SYNO.FileStation.Download" in self.path:
+            missing = "nope" in self.path
+            body = b'{"error":{"code":408},"success":false}' if missing else BLOB
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json" if missing else "application/octet-stream")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         body = json.dumps({"success": True, "data": {"ok": 1}}).encode()
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
@@ -86,6 +98,18 @@ except NasError as e:
     assert "changed" in str(e) and "nas trust --reset" in str(e), e
 assert cli.main(["trust", "--reset", origin2]) == 0 and origin2 not in load_pins(pins)
 assert b2._send(__import__("urllib.request").request.Request(origin2 + "/x"), 5)["success"], "trusted again after reset"
+# binary File Station download (incident rescue pulls captures with it): exact bytes, mode 600, no overwrite
+b2._sid = "sid"
+dl = os.path.join(_env.TMP, "dl.bin")
+assert b2.download_to("/share/map-1000-2000.bin", dl) == len(BLOB) and open(dl, "rb").read() == BLOB
+assert oct(os.stat(dl).st_mode & 0o777) == "0o600"
+for path, target in (("/share/map.bin", dl), ("/share/nope.bin", dl + "2")):
+    try:
+        b2.download_to(path, target)
+        raise AssertionError("download overwrote a file or accepted an error answer")
+    except (FileExistsError, NasError):
+        pass
+assert not os.path.exists(dl + "2")
 # tls.verify true: the system CAs decide, and a self-signed certificate fails
 _env.use_config({"tls": {"verify": True, "known_certs_file": pins}})
 try:

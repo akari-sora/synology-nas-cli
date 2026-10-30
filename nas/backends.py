@@ -672,6 +672,31 @@ class PasswordBackend:
         return {"ok": False, "error": r.get("error"), "version": version}
 
 
+    def download_to(self, fs_path: str, local_path: str, timeout: float = 600) -> int:
+        """Stream one File Station file (e.g. /share/dir/file) to a new local file (mode 600). Returns bytes."""
+        if not self._sid:
+            self.login()
+        origin = self.select_origin()
+        q = urllib.parse.urlencode({"api": "SYNO.FileStation.Download", "version": "2", "method": "download",
+                                    "mode": "download", "path": json.dumps([fs_path])})
+        req = urllib.request.Request(self._url("/webapi/entry.cgi?" + q))
+        req.add_header("Cookie", f"id={self._sid}")
+        req.add_header("Origin", origin)
+        n = 0
+        with self._open(req, timeout) as r:
+            ctype = r.headers.get("Content-Type", "")
+            first = r.read(1 << 20)
+            if ctype.startswith("application/json") and first.lstrip().startswith(b'{"error"'):
+                raise NasError(f"download {fs_path}: {first[:200].decode('utf-8', 'replace')}")
+            fd = os.open(local_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as out:
+                block = first
+                while block:
+                    out.write(block)
+                    n += len(block)
+                    block = r.read(1 << 20)
+        return n
+
     def http_raw(self, path: str, data: bytes | None = None, headers: dict | None = None,
                  cookies: dict | None = None, timeout: float = 30) -> tuple[int, dict, str, dict]:
         """Request a DSM-hosted page with the session cookie (`id=<sid>`).

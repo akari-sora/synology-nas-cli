@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:synology-nas-cli:schema:incident-rescue",
+  "title": "nas --json incident rescue",
+  "type": "object",
+  "required": [
+    "workdir",
+    "steps"
+  ],
+  "properties": {
+    "workdir": {
+      "type": "string"
+    },
+    "steps": {
+      "type": "object",
+      "properties": {
+        "contain": {
+          "$ref": "#/$defs/step"
+        },
+        "toolkit": {
+          "$ref": "#/$defs/step"
+        },
+        "capture": {
+          "$ref": "#/$defs/step"
+        },
+        "pull": {
+          "$ref": "#/$defs/step"
+        },
+        "venv": {
+          "$ref": "#/$defs/step"
+        },
+        "keys": {
+          "$ref": "#/$defs/step"
+        },
+        "sample": {
+          "$ref": "#/$defs/step"
+        },
+        "decrypt": {
+          "$ref": "#/$defs/step"
+        }
+      }
+    },
+    "failed_step": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "plan": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "next_steps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "step": {
+      "type": "object",
+      "required": [
+        "status",
+        "time"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "done",
+            "failed",
+            "running"
+          ]
+        },
+        "time": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

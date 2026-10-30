@@ -54,7 +54,18 @@ EPILOGS = {
   --save-exe DIR                       copy each candidate's executable into DIR on the NAS (root-only, 700)
   --release                            SIGCONT the PIDs the last freeze recorded; start paused packages
 Runs as root through a temporary Task Scheduler task (--backend password, needs deploy.stage_dir) or
-directly with --backend local. JSON: schemas/incident-contain.schema.json.""",
+directly with --backend local. JSON: schemas/incident-contain.schema.json.
+
+rescue (memory capture and key recovery with https://github.com/soimy/c3rb3r-rescue, fetched at
+incident.rescue_commit):
+  nas incident rescue --yes --capture-dir /usbshare1/rescue
+        contain -> clone + verify the toolkit -> capture_process_memory.py for each frozen PID (as root,
+        into a new case folder; refused on the volume holding the encrypted data, override --force)
+        -> download -> venv + pinned requirements + self-tests -> recover_process_key.py candidates
+  ... --sample /share/file.L0CK3D [--expected-sha256 HEX]   test every candidate on a copy
+  ... --decrypt-from /share/folder --decrypt-to /mnt/usb/out  decrypt copies with the verified candidate
+  --workdir DIR keeps state.json; the same command continues where it stopped. --keep-on-nas stops after
+  the capture. JSON: schemas/incident-rescue.schema.json.""",
 }
 
 NO_SESSION = ("config", "login", "logout", "trust", "mcp", "setup", "doctor")
@@ -145,8 +156,9 @@ def build_parser() -> argparse.ArgumentParser:
             sp.add_argument("--test", action="store_true",
                             help="send DSM's test notification through the webhook")
         if name == "incident":
-            sp.add_argument("action", nargs="?", choices=["fix", "contain"],
-                            help="fix: apply the hardening (see --dry-run); contain: freeze encryptor processes")
+            sp.add_argument("action", nargs="?", choices=["fix", "contain", "rescue"],
+                            help="fix: apply the hardening (see --dry-run); contain: freeze encryptor processes; "
+                                 "rescue: capture their memory and recover the file key (c3rb3r-rescue)")
             sp.add_argument("--probe", action="store_true", help="TCP-probe the public address from this machine")
             sp.add_argument("--probe-timeout", type=float, default=1.5, help="seconds per TCP connect")
             sp.add_argument("--scan", action="store_true", help="search every share for ransom notes (minutes)")
@@ -168,6 +180,22 @@ def build_parser() -> argparse.ArgumentParser:
                                                              "(created root-only, mode 700)")
             c.add_argument("--cpu-threshold", type=float, default=50.0,
                            help="average CPU %% that makes a process outside Synology paths a candidate")
+            r = sp.add_argument_group("incident rescue")
+            r.add_argument("--workdir", metavar="DIR", help="local work folder (state.json; run again to continue); "
+                                                            "default ~/.local/share/synology-nas-cli/rescue/<time>")
+            r.add_argument("--no-contain", action="store_true", help="skip the freeze (processes already stopped)")
+            r.add_argument("--rescue-dir", metavar="PATH", help="an existing c3rb3r-rescue checkout")
+            r.add_argument("--capture-dir", metavar="NAS_FOLDER",
+                           help="File Station folder for the memory capture, on a USB disk or another volume "
+                                "(e.g. /usbshare1/rescue)")
+            r.add_argument("--keep-on-nas", action="store_true", help="stop after the capture; leave it on the NAS")
+            r.add_argument("--sample", metavar="NAS_FILE", help="encrypted file to test the candidates on (a copy)")
+            r.add_argument("--expected-sha256", metavar="HEX", help="SHA-256 of the sample's original")
+            r.add_argument("--expected-marker", metavar="8HEX", help="session marker for decrypt_copy.py")
+            r.add_argument("--decrypt-from", metavar="NAS_FOLDER", help="decrypt copies of every *.L0CK3D below it")
+            r.add_argument("--decrypt-to", metavar="DIR", help="local / external folder for decrypted copies")
+            r.add_argument("--keep-copies", action="store_true", help="keep the downloaded ciphertext copies")
+            r.add_argument("--python", metavar="PATH", help="Python >= incident.rescue_min_python for the toolkit")
             g = sp.add_argument_group("incident fix")
             g.add_argument("--dry-run", action="store_true", help="print the plan and the API calls; send no write")
             g.add_argument("--yes", action="store_true", help="apply without asking")

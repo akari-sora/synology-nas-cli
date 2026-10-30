@@ -131,6 +131,19 @@ def webhook(s, override: str | None = None) -> dict:
                    "(or pass --webhook-item op://VAULT/ITEM)")
 
 
+def share_real_path(s, fs_path: str) -> str:
+    """Path on the NAS's disk of a File Station path (/share/sub/dir)."""
+    fs_path = "/" + fs_path.strip("/")
+    share = fs_path.split("/")[1]
+    d = need("SYNO.FileStation.List", s.call("SYNO.FileStation.List", "list_share", version=2,
+                                             params={"additional": ["real_path"]})) or {}
+    real = next(((x.get("additional") or {}).get("real_path") for x in d.get("shares") or []
+                 if x.get("name") == share), None)
+    if not real:
+        raise NasError(f"shared folder {share!r} not found (or real_path not reported)")
+    return real.rstrip("/") + fs_path[len(share) + 1:]
+
+
 def _stage(s) -> tuple:
     """(FileStation path, path on the NAS's disk) of the staging folder."""
     stage = _deploy()["stage_dir"].rstrip("/")

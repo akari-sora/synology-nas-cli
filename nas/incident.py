@@ -1316,4 +1316,7 @@ def incident(s, args):
     if getattr(args, "action", None) == "contain":
         from .contain import contain
         return contain(s, args)
+    if getattr(args, "action", None) == "rescue":
+        from .rescue import rescue
+        return rescue(s, args)
     return audit(s, args)

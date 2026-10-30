@@ -127,6 +127,10 @@ DEFAULTS = {
         # the PIDs of the last freeze are kept for --release.
         "ioc_process_names": [],
         "contain_state_file": "/root/.nas-incident-contain.json",
+        # `incident rescue`: the community toolkit (fetched at run time, pinned), and the Python it needs locally.
+        "rescue_repo": "https://github.com/soimy/c3rb3r-rescue.git",
+        "rescue_commit": "ef18b9980cccfe8326b16557c6b48933a80e0c99",
+        "rescue_min_python": "3.11",
     },
 }
 
