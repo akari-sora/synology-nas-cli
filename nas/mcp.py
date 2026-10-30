@@ -177,6 +177,49 @@ def _check_args(schema: dict, args) -> str | None:
     return None
 
 
+SETUP_FLAGS = {"origin": "--origin", "user": "--user", "password_source": "--password-source",
+               "otp_source": "--otp-source", "tls": "--tls", "allowed_network": "--allowed-network"}
+
+
+def setup_changes(a: dict) -> list:
+    """Arguments of the MCP setup tool that would change a value the config file already has."""
+    import ipaddress
+    from .onboard import _load_file
+    f = _load_file(config.config_path()[0])
+    cred = f.get("credentials") or {}
+    out = []
+    if a.get("origin") and f.get("origins"):
+        want = [a["origin"]] if isinstance(a["origin"], str) else a["origin"]
+        want = [o.strip().rstrip("/") for x in want for o in x.split(",") if o.strip()]
+        if want != [o.rstrip("/") for o in f["origins"]]:
+            out.append("origin")
+    if a.get("user") and (cred.get("username") or cred.get("op_username")) and a["user"] != cred.get("username"):
+        out.append("user")
+    src = a.get("password_source")
+    if src and (cred.get("op_password") or cred.get("password_command") or cred.get("source")):
+        kind, _, value = src.partition(":")
+        same = (kind == "op" and value == cred.get("op_password")) or (
+            kind in ("keychain", "env", "prompt") and cred.get("source") == kind and not cred.get("op_password")
+            and not cred.get("password_command"))
+        if not same:
+            out.append("password_source")
+    otp = a.get("otp_source")
+    if otp and (cred.get("op_otp") or cred.get("otp_command")):
+        if not (otp == "op" and cred.get("op_otp") and not cred.get("otp_command")):
+            out.append("otp_source")
+    if a.get("tls") and "verify" in (f.get("tls") or {}) and (a["tls"] == "verify") != bool(f["tls"]["verify"]):
+        out.append("tls")
+    if a.get("allowed_network") and f.get("allowed_networks"):
+        def norm(xs):
+            try:
+                return sorted(str(ipaddress.ip_network(x, strict=False)) for x in xs)
+            except ValueError:
+                return list(xs)
+        if norm(a["allowed_network"]) != norm(f["allowed_networks"]):
+            out.append("allowed_network")
+    return out
+
+
 class Server:
     def __init__(self, session_factory, auto_confirm: bool = False):
         self.session_factory = session_factory
@@ -205,6 +248,12 @@ class Server:
                     flag = "--" + k.replace("_", "-")
                     return self._error(f"{k} command:... runs a local command; it is set with `nas setup {flag} "
                                        "command:...` on the command line. Through MCP: op:..., keychain or env.", 2)
+            changed = setup_changes(args)
+            if changed:
+                return self._error("setup through MCP fills fields the config does not have yet; "
+                                   + ", ".join(changed) + " already set in " + config.config_path()[0]
+                                   + ". Change them with `nas setup` on the command line (e.g. `nas setup "
+                                   + " ".join(SETUP_FLAGS[k] + " ..." for k in changed) + "`).", 2)
         argv = TOOLS[name][3](dict(args, _auto=self.auto_confirm))
         try:
             ns = parse_args(argv)

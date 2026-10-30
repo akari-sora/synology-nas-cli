@@ -665,6 +665,9 @@ def configured_v4() -> tuple:
             net = ipaddress.ip_network(n, strict=False)
         except ValueError as e:
             raise NasError(f"allowed_networks: {e}")
+        if net.prefixlen < 8:
+            raise NasError(f"allowed_networks: {n!r} is a /{net.prefixlen}, wider than a /8; set the LAN or VPN "
+                           "ranges, e.g. 192.168.0.0/24 (nas setup --allowed-network CIDR)")
         if net.version == 6:
             v6.append(str(net))
         elif net.is_loopback:

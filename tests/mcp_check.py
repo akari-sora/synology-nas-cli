@@ -186,6 +186,28 @@ body = json.loads(st["content"][0]["text"])
 assert st["_meta"]["exit_code"] == 3 and not st["isError"] and {m["field"] for m in body["missing"]} >= {
     "origin", "password_source"}, body
 assert all(m["ask_user"].endswith("?") or m["ask_user"].endswith(".") for m in body["missing"])
+# setup fills what the config lacks; a different value for a field the file has is answered with exit 2
+cfgfile = os.environ["NAS_CONFIG"]
+os.environ.pop("NAS_PASSWORD", None)
+json.dump({"origins": ["https://192.0.2.10:5001/"], "allowed_networks": ["192.0.2.0/24"], "tls": {"verify": False},
+           "credentials": {"username": "ops", "source": "env"}}, open(cfgfile, "w"))
+same = mcp.Server(factory).call_tool("setup", {"origin": "https://192.0.2.10:5001", "allowed_network": ["192.0.2.7/24"],
+                                               "tls": "pin", "password_source": "env", "user": "ops"})
+body = json.loads(same["content"][0]["text"])  # the same values pass; what is still missing is asked for
+assert not same["isError"] and same["_meta"]["exit_code"] == 3 and [m["field"] for m in body["missing"]] == ["password"]
+for arg, val in (("origin", "https://192.0.2.99:5001"), ("allowed_network", ["0.0.0.0/0"]), ("tls", "verify"),
+                 ("user", "someone"), ("password_source", "keychain"), ("password_source", "op:op://V/J/password")):
+    before = open(cfgfile).read()
+    r = mcp.Server(factory).call_tool("setup", {arg: val})
+    assert r["isError"] and r["_meta"]["exit_code"] == 2, (arg, r)
+    assert arg in r["content"][0]["text"] and "nas setup" in r["content"][0]["text"], r
+    assert open(cfgfile).read() == before, "nothing written"
+for cred, arg, val in (({"op_username": "op://V/I/username", "op_password": "op://V/I/password"}, "user", "ops"),
+                       ({"op_password": "op://V/I/password"}, "password_source", "env"),
+                       ({"op_otp": True}, "otp_source", "none")):
+    json.dump({"credentials": cred}, open(cfgfile, "w"))
+    r = mcp.Server(factory).call_tool("setup", {arg: val})
+    assert r["isError"] and r["_meta"]["exit_code"] == 2 and arg in r["content"][0]["text"], (cred, r)
 dr = mcp.Server(factory).call_tool("doctor", {})
 assert dr["_meta"]["exit_code"] == 1 and "checks" in json.loads(dr["content"][0]["text"])
 _env.use_config({})

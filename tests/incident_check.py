@@ -340,4 +340,20 @@ assert incident.plan_rotation(s2)["target"] == "ops", "account resolved through 
 
 p = incident._new_password()
 assert len(p) == 24 and any(ch.isupper() for ch in p) and any(ch.isdigit() for ch in p)
+# an allowed network wider than a /8 stops the firewall and AutoBlock fixes, naming the entry
+for wide in ("0.0.0.0/0", "10.0.0.0/7", "::/0"):
+    _env.use_config({"allowed_networks": ["192.0.2.0/24", wide]})
+    try:
+        incident.firewall_allow_list("192.0.2.50")
+        raise AssertionError(wide + " accepted")
+    except NasError as e:
+        assert repr(wide) in str(e) and "wider than a /8" in str(e), str(e)
+    try:
+        incident.fix(FakeSession(FakeNas()), args(action="fix", dry_run=True, only="firewall"))
+        raise AssertionError(wide + " accepted by incident fix")
+    except NasError as e:
+        assert repr(wide) in str(e)
+_env.use_config({"allowed_networks": ["10.0.0.0/8"]})
+assert [str(n) for n in incident.configured_v4()[0]] == ["10.0.0.0/8"]
+_env.use_config({})
 print(f"incident checks ok (python {sys.version.split()[0]})")

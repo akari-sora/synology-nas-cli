@@ -66,8 +66,9 @@ rescue (memory capture and key recovery with https://github.com/soimy/c3rb3r-res
 incident.rescue_commit):
   nas incident rescue --yes --capture-dir /usbshare1/rescue
         contain -> clone + verify the toolkit -> capture_process_memory.py for each frozen PID (as root,
-        into a new case folder; refused on the volume holding the encrypted data, override --force)
-        -> download -> venv + pinned requirements + self-tests -> recover_process_key.py candidates
+        into a new case folder; refused on the volume holding the encrypted data, override
+        --force-same-volume) -> download -> venv (pip --require-hashes) + self-tests
+        -> recover_process_key.py candidates. --force-unverified-key, --force-unpinned-toolkit; --force = all
   ... --sample /share/file.L0CK3D [--expected-sha256 HEX]   test every candidate on a copy
   ... --decrypt-from /share/folder --decrypt-to /mnt/usb/out  decrypt copies with the verified candidate
   --workdir DIR keeps state.json; the same command continues where it stopped. --keep-on-nas stops after
@@ -204,6 +205,13 @@ def build_parser() -> argparse.ArgumentParser:
             r.add_argument("--decrypt-to", metavar="DIR", help="local / external folder for decrypted copies")
             r.add_argument("--keep-copies", action="store_true", help="keep the downloaded ciphertext copies")
             r.add_argument("--python", metavar="PATH", help="Python >= incident.rescue_min_python for the toolkit")
+            r.add_argument("--force-same-volume", action="store_true",
+                           help="capture onto the volume that holds the encrypted data")
+            r.add_argument("--force-unverified-key", action="store_true",
+                           help="decrypt with the first key candidate when no --sample verified one")
+            r.add_argument("--force-unpinned-toolkit", action="store_true",
+                           help="--rescue-dir at another commit or with local changes; requirements without known "
+                                "hashes installed without hash checks")
             g = sp.add_argument_group("incident fix")
             g.add_argument("--dry-run", action="store_true", help="print the plan and the API calls; send no write")
             g.add_argument("--yes", action="store_true", help="apply without asking")
