@@ -285,7 +285,7 @@ While files are being encrypted, `nas incident contain --yes` is the first comma
 
 Each step is recorded in `<workdir>/state.json` (`--workdir`, default `~/.local/share/synology-nas-cli/rescue/<time>`); the same command continues where it stopped. What it writes on the NAS:
 
-- the case folder `--capture-dir/case-<time>-<random>/pid-N` (kept; owned by the signed-in account; delete it when the capture is safe elsewhere), with `.capture_process_memory.py` inside while the capture runs. On a shared folder with Windows ACL (the DSM default) access follows the share's ACL: folders created with mode 0700 were listed as 0755 in testing.
+- the case folder `--capture-dir/case-<time>-<random>/pid-N` (kept; owned by the signed-in account; delete it when the capture is safe elsewhere), with `.capture_process_memory.py` inside while the capture runs. In testing on a DSM shared folder, folders created with mode 0700 were listed as 0755 afterwards (files kept 0400); check who can read that shared folder.
 - with `--backend password`: the uploaded tool `deploy.stage_dir/nas-rescue-tool-<random>.py` and the result file `deploy.stage_dir/nas-incident-rescue-<token>.json`, both deleted after the run, and the temporary root task `nas-incident-rescue`, deleted after the run.
 - the `contain` step: the temporary task `nas-incident-contain` and its result file (deleted), and the freeze's state file `incident.contain_state_file` (`/root/.nas-incident-contain.json`), removed by `nas incident contain --release`.
 
