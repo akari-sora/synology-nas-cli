@@ -251,7 +251,15 @@ nas incident fix --only firewall,smb_min_protocol
 nas incident fix --skip admin_account
 nas incident fix --ransom-scan --yes          # a clean scan also allows the snapshot fixes
 nas incident fix --upgrade --rotate-password --yes   # opt-in extras
+
+nas incident contain                       # list processes that look like an encryptor (read-only)
+nas incident contain --yes                 # SIGSTOP them (all threads) so their memory and keys stay intact
+nas incident contain --yes --stop-sync     # also pause Cloud Sync, Hyper Backup and Container Manager
+nas incident contain --yes --save-exe /volumeUSB1/usbshare/evidence   # copy each executable (sha256 recorded)
+nas incident contain --release             # SIGCONT the frozen PIDs and restart what --stop-sync paused
 ```
+
+While files are being encrypted, `nas incident contain --yes` is the first command: it freezes the encryptor (`SIGSTOP`, never killed) so the session keys stay in its memory, then prints the next steps. Memory capture and key recovery from the frozen process: [soimy/c3rb3r-rescue](https://github.com/soimy/c3rb3r-rescue).
 
 If the audit shows `ransomware_files FAIL` or `external_signins FAIL` you are past hardening: follow [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md) (isolate first, keep evidence, restore from snapshots).
 
@@ -432,6 +440,13 @@ tests/smoke_live.sh       # optional: read-only commands against your NAS (uses 
 | `ransomware_files` | 搭配 `--scan`：透過 File Station 搜尋所有共用資料夾是否有 `*.L0CK3D`、`*.LOCK3D` 或 `read-me3.txt` | 不自動修改（若為 `FAIL` 請立即隔離並依 [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md) 處置） |
 | `exploit_attempts` | 掃描連線紀錄是否有 CVE-2024-10441 登入注入字串（`PLUGIN_VALUE_END`、`LD_PRELOAD=`、`LD_DEBUG_OUTPUT`）或 `incident.ioc_ips` | 不自動修改（可進一步執行 `--deep` 確認是否成功植入） |
 | `exploit_attempts_logs`、`ioc_cron`、`ioc_binaries`、`ioc_users`、`ioc_ssh_keys`、`ioc_processes` | 搭配 `--deep`：執行唯讀 root 收集器檢查 `/var/log/synoplugin.log*`、`synoscgi.log*`、`auth.log*`、`/etc/cron.d/synot*`、`/bin/libgld`、`/bin/qnetd`、`/bin/l0ck.enc`、異常帳號、`authorized_keys` 與 `/proc` 程序／外部連線 | 不自動修改（若為 `FAIL` 請依 [`docs/INCIDENT-C3RB3R.md`](docs/INCIDENT-C3RB3R.md) 進行事件應變） |
+
+### 正在被加密時：`nas incident contain`
+
+- `nas incident contain`：列出疑似加密程式的程序（`libgld`、`qnetd`、從暫存資料夾執行的程式、開著 `*.L0CK3D` 或 `read-me3.txt` 的程序）。
+- `nas incident contain --yes --stop-sync`：對它們送 `SIGSTOP`（所有執行緒，逐一確認狀態為 `T`），讓金鑰留在記憶體裡；同時暫停 Cloud Sync、Hyper Backup 和 Container Manager。
+- `--save-exe DIR` 另存執行檔與 sha256；`nas incident contain --release` 讓它們繼續並重新啟動暫停的套件。
+- 接著用 [soimy/c3rb3r-rescue](https://github.com/soimy/c3rb3r-rescue) 擷取記憶體、找金鑰、在副本上解密。
 
 ### 安裝與環境設定
 

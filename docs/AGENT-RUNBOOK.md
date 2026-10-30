@@ -84,6 +84,15 @@ nas incident --deep --json
 
 Adds `exploit_attempts_logs`, `ioc_cron`, `ioc_binaries`, `ioc_users`, `ioc_ssh_keys`, `ioc_processes` and the raw collector result under `deep`. Runs one read-only script as root through a temporary Task Scheduler task (needs `deploy.stage_dir`, Step 2). `ioc_users` WARN lists accounts to confirm with the human; known ones go into `incident.allowed_users`.
 
+## If files are being encrypted right now
+
+```bash
+nas incident contain --json                         # candidates (read-only)
+nas incident contain --yes --stop-sync --json       # freeze them, pause sync/backup/containers
+```
+
+Exit 0 with `frozen` listing each PID and thread states (`T` = stopped; `D` = waiting on I/O, check again with the command in `next_steps`). Then: keep the NAS powered on, capture each frozen process's memory with https://github.com/soimy/c3rb3r-rescue (its `skills/dsm-ransomware-rescue` skill), copy the executables (`--save-exe DIR`), run Step 6, and `nas incident contain --release` when done.
+
 ## Step 7 (optional): monitoring
 
 ```bash
