@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import _env
 
 BIN = os.path.join(_env.ROOT, "bin", "nas")
-T = tempfile.mkdtemp(prefix="nas-onboard-")
+T = tempfile.mkdtemp(prefix="onboard-", dir=_env.TMP)  # removed with _env.TMP
 
 
 def run(args, env=None, stdin=subprocess.DEVNULL, timeout=40):

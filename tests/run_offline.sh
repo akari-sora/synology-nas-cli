@@ -8,6 +8,8 @@ pys=(python3)
 if command -v uv >/dev/null 2>&1 && py38=$(uv python find 3.8 2>/dev/null) && [ -n "$py38" ]; then
   pys+=("$py38")
 fi
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/nas-offline-XXXXXX")
+trap 'rm -rf "$scratch"' EXIT
 fail=0
 for py in "${pys[@]}"; do
   for t in $tests; do
@@ -21,7 +23,7 @@ done
 # every module compiles and the CLI answers --help without a config
 for py in "${pys[@]}"; do
   "$py" -I -B -m py_compile nas/*.py || fail=1
-  NAS_CONFIG= HOME="$(mktemp -d)" "$py" -I -B bin/nas --help >/dev/null || { echo "FAIL bin/nas --help ($py)"; fail=1; }
+  NAS_CONFIG= HOME="$(mktemp -d "$scratch/home-XXXXXX")" "$py" -I -B bin/nas --help >/dev/null || { echo "FAIL bin/nas --help ($py)"; fail=1; }
 done
 tests/install_check.sh || fail=1
 [ $fail = 0 ] && echo "all offline tests passed (${#pys[@]} interpreter(s))"

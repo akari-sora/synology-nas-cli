@@ -30,7 +30,7 @@ class Hook(BaseHTTPRequestHandler):
 
 srv = HTTPServer(("127.0.0.1", 0), Hook)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
-d = tempfile.mkdtemp()
+d = tempfile.mkdtemp(dir=_env.TMP)
 cfg = os.path.join(d, "webhook.json")
 with open(cfg, "w") as f:
     json.dump({"url": f"http://127.0.0.1:{srv.server_port}/x", "header": "Authorization: Bearer TESTKEY"}, f)

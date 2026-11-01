@@ -181,7 +181,7 @@ for k in ("password_source", "otp_source"):
 assert "cmdline" in mcp.INSTRUCTIONS and "descr" in mcp.INSTRUCTIONS and "(user)" in mcp.INSTRUCTIONS
 # setup without anything configured: the missing-fields JSON, exit_code 3, no prompt
 import tempfile
-os.environ["NAS_CONFIG"] = os.path.join(tempfile.mkdtemp(), "c.json")
+os.environ["NAS_CONFIG"] = os.path.join(tempfile.mkdtemp(dir=_env.TMP), "c.json")
 st = mcp.Server(factory).call_tool("setup", {})
 body = json.loads(st["content"][0]["text"])
 assert st["_meta"]["exit_code"] == 3 and not st["isError"] and {m["field"] for m in body["missing"]} >= {
