@@ -35,6 +35,7 @@ assert upgrade._pack_header(b"\x15\xad\xbe\xef" + b"\x00" * 8000) is None
 assert upgrade._pack_header(b"too short") is None
 assert upgrade._pack_header(good_pack()[:100]) is None  # truncated before the header
 assert upgrade._pack_header(b"{'archive_type': 'update_pack', broken") is None
+assert upgrade._pack_header(b"{'archive_type': 'update_pack', 'unique': 'a}b'}") is None
 
 assert upgrade._update_pack_url("synology_braswell_716+", 90080, 1) == \
     ("https://global.synologydownload.com/download/DSM/criticalupdate/update_pack"
@@ -119,6 +120,8 @@ class FakeSession:
         if (api, method) == ("SYNO.Core.Upgrade", "status"):
             if isinstance(self.status, Exception):
                 raise self.status
+            if isinstance(self.status, dict):
+                return self.status
             return {"ok": True, "data": {"status": self.status, "allow_upgrade": True}}
         if (api, method) == ("SYNO.Core.Upgrade.PreCheck", "start"):
             return {"ok": True}
@@ -234,6 +237,23 @@ restore_net()
 assert ("SYNO.Core.Upgrade.Patch", "upload", 1) not in s.calls, s.calls
 assert s.cleaned == 0, s.calls
 
+# an unreadable upgrade status warns but proceeds (old DSM may lack the API)
+stub_discovery()
+stub_download()
+s = FakeSession(FW0, info_script=[FW0, FW1], status=NasError("no such api"))
+lines, data = upgrade.upgrade(s, up_args(install_update=True, yes=True))
+restore_net()
+assert data["action"] == "installed", data
+
+# ok:false or a missing status field: warned, not treated as busy
+for bad_status in ({"ok": False, "error": {"code": 103}}, {"ok": True, "data": {}}):
+    stub_discovery()
+    stub_download()
+    s = FakeSession(FW0, info_script=[FW0, FW1], status=bad_status)
+    lines, data = upgrade.upgrade(s, up_args(install_update=True, yes=True))
+    restore_net()
+    assert data["action"] == "installed", (bad_status, data)
+
 # upload echo names another build: clean the stage, never start
 stub_discovery()
 stub_download()
@@ -282,6 +302,7 @@ s = FakeSession(FW1)
 lines, data = upgrade.upgrade(s, up_args(dry_run=True))
 restore_net()
 assert data["action"] == "none" and "Already on the latest build" in "\n".join(lines), (lines, data)
+assert "--force" not in "\n".join(lines)  # --force would refuse the downgrade, so don't offer it
 
 # same build, older micro: the full 7.4.1 image is an upgrade for a 7.4.0 box
 s = FakeSession("DSM 7.4.0-90080")
@@ -320,6 +341,19 @@ try:
     raise AssertionError("wrong --pat accepted")
 except NasError as e:
     assert "716+II" in str(e), e
+assert ("SYNO.Core.Upgrade.Patch", "upload", 1) not in s.calls, s.calls
+os.remove(pat_path)
+
+# --pat with pack magic but an unreadable header is refused, never a full image
+fd, pat_path = tempfile.mkstemp(suffix=".pat")
+os.write(fd, b"\xb6\xad\xbe\xef" + b"\x00" * 8192)
+os.close(fd)
+s = FakeSession(FW0)
+try:
+    upgrade.upgrade(s, up_args(pat=pat_path, yes=True))
+    raise AssertionError("headerless pack accepted")
+except NasError as e:
+    assert "unreadable" in str(e), e
 assert ("SYNO.Core.Upgrade.Patch", "upload", 1) not in s.calls, s.calls
 os.remove(pat_path)
 
@@ -363,29 +397,36 @@ try:
     # ready+done on the first poll with a reboot expected: not a success (times out)
     ws = WaitSession([FW0], [READY])
     try:
-        upgrade.wait_until_ready(ws, 0.01, target_fw=FW1, exact_target=True, expect_reboot=True)
+        upgrade.wait_until_ready(ws, 0.01, target_fw=FW1, target_match="exact")
         raise AssertionError("instant ready accepted")
     except NasError as e:
         assert "not ready" in str(e), e
 
-    # version flips without a reboot: success (room for the 60 s login spacing)
+    # version flips with a reboot expected but never observed still count when seen
     ws = WaitSession([FW0, FW1], [READY, READY])
-    sd = upgrade.wait_until_ready(ws, 300, target_fw=FW1, exact_target=True, expect_reboot=False)
+    sd = upgrade.wait_until_ready(ws, 300, target_fw=FW1, target_match="exact")
     assert sd.get("dsm_upgrade_all_done"), sd
 
     # down, back on the old version: an error, not a success
     ws = WaitSession([FW0], [None, READY])
     try:
-        upgrade.wait_until_ready(ws, 60, target_fw=FW1, exact_target=True, expect_reboot=True)
+        upgrade.wait_until_ready(ws, 60, target_fw=FW1, target_match="exact")
         raise AssertionError("stale version accepted")
     except NasError as e:
         assert "still on" in str(e), e
 
-    # full-image wait: build equality is enough (the image ships Update 0)
+    # full-image wait: micro equality is required (7.4.0 vs the 7.4.1 image)
     ws = WaitSession(["DSM 7.4.1-90080"], [None, READY])
-    sd = upgrade.wait_until_ready(ws, 60, target_fw="DSM 7.4.1-90080", exact_target=False,
-                                  expect_reboot=True)
+    sd = upgrade.wait_until_ready(ws, 60, target_fw="DSM 7.4.1-90080", target_match="micro")
     assert sd.get("dsm_upgrade_all_done"), sd
+
+    # down, back on the older micro: an error, not a success
+    ws = WaitSession(["DSM 7.4.0-90080"], [None, READY])
+    try:
+        upgrade.wait_until_ready(ws, 60, target_fw="DSM 7.4.1-90080", target_match="micro")
+        raise AssertionError("stale micro accepted")
+    except NasError as e:
+        assert "still on" in str(e), e
 
     # --wait-only keeps the old shape (no target, needs a down first)
     ws = WaitSession([FW0], [None, READY])
