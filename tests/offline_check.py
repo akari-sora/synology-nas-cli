@@ -47,6 +47,9 @@ assert _version_key("7.4.1-90080-1") == (7, 4, 90080, 1)
 assert _version_key("DSM 7.4.1-90080 Update 0") < _version_key("7.4.1-90080-1")
 assert _version_key("DSM 7.4.1-90080 Update 1") > _version_key("7.4.1-90080")
 assert _version_key("DSM 7.3.2-86009 Update 4") < _version_key("DSM 7.3.2-86009 Update 5")
+# tolerant of the spellings DSM never prints, so dsm_behind cannot misfire on them
+assert _version_key("DSM 7.4.1-90080 update 2") == (7, 4, 90080, 2)
+assert _version_key("DSM 7.4.1-90080 Update1") == (7, 4, 90080, 1)
 assert _strip_html("<style>x</style><div><b>A</b><br>B&amp;C</div>") == "A\nB&C"
 
 # SA-26:13 compares (build, update) only. A higher micro version is not a substitute.
@@ -70,7 +73,8 @@ CASES = [
     ("DSM 7.3.2-86009 Update 4", "patched", "vulnerable", "vulnerable"),
     ("DSM 7.3.2-86009 Update 5", "patched", "patched", "patched"),
     ("DSM 7.3.2-1 Update 0", "vulnerable", "vulnerable", "vulnerable"),
-    ("DSM 7.3.1-86009 Update 5", "patched", "vulnerable", "vulnerable"),
+    ("DSM 7.3.1-86009 Update 5", "vulnerable", "vulnerable", "vulnerable"),
+    ("DSM 7.3.1-86003 Update 4", "vulnerable", "vulnerable", "vulnerable"),
     ("DSM 7.2.2-72806 Update 8", "vulnerable", "vulnerable", "vulnerable"),
     ("DSM 7.2.2-72806 Update 9", "patched", "vulnerable", "vulnerable"),
     ("DSM 7.2.2-72806 Update 10", "patched", "patched", "patched"),
@@ -96,7 +100,7 @@ for fw, sa13, sa19, overall in CASES:
     elif sa19 == "vulnerable":
         assert overall != "patched" and g.get("fixed_in") == b["fixed_in"], (fw, g)
 assert advisories.dsm_advisory_verdict("DSM 7.4.1-90080 Update 1", "sa_26_13")["fixed_in"] == "7.4-90075"
-assert advisories.dsm_advisory_verdict("DSM 7.3.2-86009 Update 5", "sa_26_13")["fixed_in"] == "7.3-86009-4"
+assert advisories.dsm_advisory_verdict("DSM 7.3.2-86009 Update 5", "sa_26_13")["fixed_in"] == "7.3.2-86009-4"
 assert advisories.dsm_advisory_verdict("DSM 7.2.2-72806 Update 10", "sa_26_13")["fixed_in"] == "7.2.2-72806-9"
 assert advisories.dsm_advisory_verdict("DSM 7.2.1-69057 Update 13", "sa_26_13")["fixed_in"] == "7.2.1-69057-12"
 assert advisories.dsm_advisory_verdict("DSM 7.4.1-90080 Update 1", "sa_26_19")["fixed_in"] == "7.4.1-90080-1"
@@ -118,7 +122,16 @@ for fw in ("DSM 7.3.2-86009 Update 4", "DSM 7.2.2-72806 Update 9", "DSM 7.2.1-69
     assert "Update & Restore" in advisories.dsm_advisory_verdict(fw, "sa_26_19")["note"], fw
 # a fix on another branch or a lower micro keeps the "upgrade" hint
 assert "nas upgrade --dry-run" in advisories.dsm_advisory_verdict("DSM 7.4.0-90080 Update 1", "sa_26_19")["note"]
+assert "nas upgrade --dry-run" in advisories.dsm_advisory_verdict("DSM 7.4.0-90080", "sa_26_19")["note"]
 assert "nas upgrade --dry-run" in advisories.dsm_advisory_verdict("DSM 7.3.1-86009 Update 5", "sa_26_19")["note"]
+# only an Update on the installed build makes Control Panel the whole fix
+assert advisories.needs_control_panel_update("DSM 7.4.1-90080 Update 0")
+assert advisories.needs_control_panel_update("DSM 7.3.2-86009 Update 4")
+assert not advisories.needs_control_panel_update("DSM 7.4.1-90080 Update 1")
+assert not advisories.needs_control_panel_update("DSM 7.4.0-90080")
+assert not advisories.needs_control_panel_update("DSM 7.3.1-86009 Update 5")
+assert not advisories.needs_control_panel_update("DSM 7.1.1-42962 Update 9")
+assert not advisories.needs_control_panel_update("garbage")
 # two branch notes are joined as sentences, not with a stray ".;"
 joined = advisories.dsm_verdict("DSM 7.1.1-42962 Update 9")["note"]
 assert ".;" not in joined and joined.count("is not covered by SA-26:") == 2, joined

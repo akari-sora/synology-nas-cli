@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import re
 
-# Synology-SA-26:13 (2026-09-18). (branch, build, update).
-# Patched means (build, update) on that branch, not a higher micro version:
-# 7.3.2-86009 Update 3 is still short of Update 4, and 7.4.1-1 is not 7.4-90075.
-# DSM 7.1 and older are not listed.
+# Synology-SA-26:13 (2026-09-18). (branch, build, update, release or None).
+# Patched means the advisory's named release at that build/update, not a higher
+# micro version: 7.3.2-86009 Update 3 is still short of Update 4, and 7.4.1-1 is
+# not 7.4-90075. DSM 7.1 and older are not listed.
 SA_26_13 = {
     "url": "https://www.synology.com/en-global/security/advisory/Synology_SA_26_13",
     "fixed": [
-        ("7.4", 90075, 0),
-        ("7.3", 86009, 4),
-        ("7.2.2", 72806, 9),
-        ("7.2.1", 69057, 12),
+        ("7.4", 90075, 0, None),
+        ("7.3", 86009, 4, "7.3.2"),
+        ("7.2.2", 72806, 9, None),
+        ("7.2.1", 69057, 12, None),
     ],
 }
 
@@ -102,6 +102,24 @@ def _branch_tuple(branch3: str) -> tuple:
     return tuple(int(x) for x in branch3.split("."))
 
 
+def _match_row(v: dict, table: dict):
+    """The advisory row for this product version, longest prefix first."""
+    return next((row for row in _rows(table) if _branch_match(v, row[0])), None)
+
+
+def _update_gap(v: dict, row) -> bool:
+    """True when row is fixed by an Update on the build already installed.
+
+    DSM installs that Update itself (Control Panel > Update & Restore); `nas upgrade`
+    looks up full builds only. A release requirement must already be met: an Update
+    on 7.4.0-90080 does not satisfy an advisory fixed in 7.4.1-90080-1.
+    """
+    _prefix, build, update, release = row
+    if v["build"] != build or v["update"] >= update:
+        return False
+    return not release or v["branch3"] == release
+
+
 def _meets(v: dict, build: int, update: int, release) -> bool:
     if release:
         current = tuple(int(x) for x in v["branch3"].split("."))
@@ -122,7 +140,7 @@ def dsm_advisory_verdict(firmware_ver: str, advisory: str) -> dict:
     if not v:
         return dict(meta, status="unknown",
                     note="cannot parse DSM version; verify it in Control Panel > Update & Restore")
-    match = next((row for row in _rows(table) if _branch_match(v, row[0])), None)
+    match = _match_row(v, table)
     if match is None:
         branch = tuple(int(x) for x in v["branch3"].split("."))
         status = "no_fix_for_branch" if branch < (7, 2, 1) else "unknown"
@@ -139,15 +157,35 @@ def dsm_advisory_verdict(firmware_ver: str, advisory: str) -> dict:
     patched = _meets(v, build, update, release)
     out = dict(meta, status="patched" if patched else "vulnerable", fixed_in=fixed_in)
     if not patched:
-        if v["build"] == build and v["update"] < update:
-            # The fix is an Update on the build already installed. Synology publishes no
-            # separate .pat for it, so `nas upgrade` cannot install it.
+        if _update_gap(v, match):
+            # An Update on the build already installed. DSM installs it; `nas upgrade`
+            # only looks up full builds, so do not send the user there.
             out["note"] = (f"{label}: this build needs Update {update}; install it in "
-                           "Control Panel > Update & Restore (`nas upgrade` installs full builds only)")
+                           "Control Panel > Update & Restore (`nas upgrade` only finds full builds)")
         else:
             out["note"] = (f"{label}: update to {fixed_in} or later "
                            "(`nas upgrade --dry-run` shows the newest build for this model)")
     return out
+
+
+def needs_control_panel_update(firmware_ver: str) -> bool:
+    """True when every open advisory is fixed by an Update on the build already installed.
+
+    Then Control Panel > Update & Restore is the whole fix; `nas upgrade` cannot help.
+    False as soon as one open advisory needs a different build, branch or release.
+    """
+    v = parse_dsm(firmware_ver)
+    if not v:
+        return False
+    open_rows = []
+    for key, table in DSM_ADVISORIES.items():
+        if dsm_advisory_verdict(firmware_ver, key)["status"] == "patched":
+            continue
+        row = _match_row(v, table)
+        if row is None or not _update_gap(v, row):
+            return False
+        open_rows.append(row)
+    return bool(open_rows)
 
 
 def dsm_verdict(firmware_ver: str) -> dict:

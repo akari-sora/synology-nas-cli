@@ -248,8 +248,12 @@ def evaluate(f, args) -> list:
         elif v["status"] == "unknown":
             add(item("dsm_version", WARN, detail, "check Control Panel > Update & Restore"))
         else:
-            add(item("dsm_version", FAIL, detail,
-                     "nas upgrade --dry-run, then `nas incident fix --upgrade` (the NAS reboots)", "upgrade"))
+            if advisories.needs_control_panel_update(fw_ver):
+                add(item("dsm_version", FAIL, detail,
+                         "install the pending Update in Control Panel > Update & Restore"))
+            else:
+                add(item("dsm_version", FAIL, detail,
+                         "nas upgrade --dry-run, then `nas incident fix --upgrade` (the NAS reboots)", "upgrade"))
 
     # 2. SA-26:14 packages
     pk, e = f["pkgs"]
@@ -1208,6 +1212,11 @@ def plan_upgrade(s, f, args) -> dict:
     it = next((x for x in evaluate(f, args) if x["id"] == "dsm_version"), None)
     if it and it["status"] == PASS and not getattr(args, "force", False):
         return _change("upgrade", "DSM", it["detail"], "-", [], refused="already patched (override: --force)")
+    sysinfo = (f.get("sys") or (None, None))[0] or {}
+    if advisories.needs_control_panel_update(sysinfo.get("firmware_ver", "")) and not getattr(args, "force", False):
+        return _change("upgrade", "DSM", it["detail"] if it else "-", "-", [],
+                       refused="the remaining fix is an Update on this build: install it in Control Panel > "
+                               "Update & Restore (`nas upgrade` only finds full builds; override: --force)")
     if s.backend_name != "password":
         return _change("upgrade", "DSM", "-", "-", [], refused="--upgrade needs --backend password (uploads the .pat)")
     from . import upgrade as up
@@ -1224,8 +1233,8 @@ def plan_upgrade(s, f, args) -> dict:
         if data.get("action") != "installed":
             if data.get("action") == "none":
                 raise NasError("nothing to install: already on the newest full build; if DSM offers an Update "
-                               "for it, install that in Control Panel > Update & Restore, "
-                               "not with `nas upgrade` (which installs full .pat builds only)")
+                               "for it, install that in Control Panel > Update & Restore "
+                               "(`nas upgrade` only finds full builds)")
             raise NasError(f"upgrade did not install ({data.get('action')})")
 
     def verify(s_):

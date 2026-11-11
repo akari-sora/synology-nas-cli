@@ -136,7 +136,7 @@ def _version_key(fw: str) -> tuple[int, int, int, int]:
     cannot see that 7.4.1-90080 Update 0 is older than 7.4.1-90080-1.
     """
     major, minor, build = _version_tuple(fw)
-    m = re.search(r"\d+\.\d+(?:\.\d+)?-\d+(?:(?:\s+Update\s+|-)(\d+))?", fw or "")
+    m = re.search(r"\d+\.\d+(?:\.\d+)?-\d+(?:(?:\s+update\s*|-)(\d+))?", fw or "", re.I)
     update = int(m.group(1)) if m and m.group(1) else 0
     return major, minor, build, update
 
@@ -167,7 +167,7 @@ def upgrade(s, args):
             if pat["build"] == build:
                 lines.append(f"Already on the newest full build (build {build}); nothing to download.")
                 lines.append("If DSM offers an Update for this build, install it in Control Panel > "
-                             "Update & Restore: `nas upgrade` installs full .pat builds only "
+                             "Update & Restore: `nas upgrade` only finds full builds "
                              "(--force reinstalls this one).")
             else:
                 lines.append("Already on the latest build; nothing to do (--force to reinstall).")
