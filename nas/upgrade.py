@@ -92,6 +92,9 @@ def _latest_nano(info: dict, build: int):
 _PACK_RE = re.compile(rb"\{'archive_type'\s*:\s*'update_pack'.*?\}", re.S)
 
 
+_PACK_MAGIC = b"\xb6\xad\xbe\xef"
+
+
 def _pack_header(data: bytes):
     """The identity dict at the start of an Update pack, or None.
 
@@ -106,7 +109,7 @@ def _pack_header(data: bytes):
         return None
     try:
         header = ast.literal_eval(m.group(0).decode("ascii"))
-    except ValueError:
+    except (ValueError, SyntaxError):
         return None
     return header if isinstance(header, dict) else None
 
@@ -163,8 +166,15 @@ def _require_idle(s) -> None:
     except NasError as e:
         _log(f"warning: cannot read upgrade status ({e}); proceeding")
         return
-    data = (st.get("data") if st.get("ok") else None) or {}
-    if data.get("status", "none") != "none":
+    if not st.get("ok"):
+        _log(f"warning: cannot read upgrade status ({describe_error('SYNO.Core.Upgrade', st)}); "
+             "proceeding")
+        return
+    data = st.get("data") or {}
+    if "status" not in data:
+        _log("warning: upgrade status has no status field; proceeding")
+        return
+    if data.get("status") != "none":
         raise NasError(f"DSM is busy (upgrade status {data.get('status')}); "
                        "wait for Control Panel > Update & Restore to finish, then retry")
 
@@ -253,18 +263,20 @@ def _session_data(s) -> dict | None:
 
 
 def wait_until_ready(s, timeout: float, saw_down: bool = False, target_fw=None,
-                     exact_target: bool = True, expect_reboot: bool = True) -> dict:
+                     target_match: str = "exact", initial_fw: str | None = None) -> dict:
     """Poll SessionData until DSM is back and `dsm_upgrade_all_done` is true.
 
     `target_fw` additionally requires the box to report that version afterwards:
-    exact (`_version_key`, Update included) when `exact_target`, else build-only
-    (`_version_tuple`). `dsm_upgrade_all_done` alone proves nothing, so a ready
-    box that never went down only counts when no reboot was expected; a box
-    that went down and came back on the old version is an error, not a success.
-    Logins during the wait answer 499 (not a password verdict); only 499s are
-    waited out, other login errors raise.
+    "exact" compares (major, minor, build, Update), "micro" compares
+    (major, minor, micro, build), "build" compares (major, minor, build).
+    `dsm_upgrade_all_done` alone proves nothing: a ready box only counts after
+    it went down, after the version was seen moving towards the target, or when
+    it already differs from `initial_fw` (the version before the install). A
+    box that went down and came back on the old version is an error, not a
+    success. Logins during the wait answer 498/499 (not a password verdict);
+    only those are waited out, other login errors raise.
     """
-    deadline, prev, last_ver = time.time() + timeout, None, 0.0
+    deadline, prev, last_ver, seen_old = time.time() + timeout, None, 0.0, False
     while time.time() < deadline:
         sd = _session_data(s)
         state = "down" if sd is None else ("ready" if sd.get("dsm_upgrade_all_done") else "finishing")
@@ -277,8 +289,6 @@ def wait_until_ready(s, timeout: float, saw_down: bool = False, target_fw=None,
             if target_fw is None:
                 if saw_down:
                     return sd
-            elif expect_reboot and not saw_down:
-                pass  # all_done was already true before the install; keep waiting for the reboot
             elif time.time() - last_ver >= 60:
                 last_ver = time.time()
                 try:
@@ -287,14 +297,21 @@ def wait_until_ready(s, timeout: float, saw_down: bool = False, target_fw=None,
                         raise NasError(describe_error("SYNO.Core.System", d))
                     actual = (d.get("data") or {}).get("firmware_ver", "")
                 except NasError as e:
-                    if "499" not in str(e):
+                    if "498" not in str(e) and "499" not in str(e):
                         raise
                     _log(f"{time.strftime('%H:%M:%S')} DSM not ready for login ({e}); waiting")
                 else:
-                    key = _version_key if exact_target else _version_tuple
-                    if key(actual) == key(target_fw):
+                    if target_match == "exact":
+                        same = _version_key(actual) == _version_key(target_fw)
+                    elif target_match == "micro":
+                        same = _product_key(actual)[:4] == _product_key(target_fw)[:4]
+                    else:
+                        same = _version_tuple(actual) == _version_tuple(target_fw)
+                    if not same:
+                        seen_old = True
+                    elif saw_down or seen_old or (initial_fw is not None and actual != initial_fw):
                         return sd
-                    if saw_down:
+                    if saw_down and not same:
                         raise NasError(f"DSM is back but still on {actual}, expected {target_fw}")
                     _log(f"{time.strftime('%H:%M:%S')} DSM ready on {actual}, waiting for {target_fw}")
         time.sleep(15)
@@ -347,8 +364,8 @@ def _box_unique() -> str:
     return unique
 
 
-def _install(s, args, path: str, *, expected_build, target_fw, exact_target: bool,
-             rerun_hint: str = "nas upgrade --yes"):
+def _install(s, args, path: str, *, expected_build, target_fw, target_match: str = "exact",
+             rerun_hint: str = "nas upgrade --yes", initial_fw: str | None = None):
     """Upload → PreCheck → start → wait, shared by the full and pack routes.
 
     `expected_build` (None skips the check) must match the upload echo or the
@@ -417,8 +434,8 @@ def _install(s, args, path: str, *, expected_build, target_fw, exact_target: boo
     data["start"] = st.get("data") or {}
     _log("upgrade started; the NAS will reboot" if expect_reboot else "upgrade started")
     s.backend._sid = s.backend._token = None  # the session dies with the reboot
-    wait_until_ready(s, args.timeout, target_fw=target_fw, exact_target=exact_target,
-                     expect_reboot=expect_reboot)
+    wait_until_ready(s, args.timeout, target_fw=target_fw, target_match=target_match,
+                     initial_fw=initial_fw)
     after = s.call("SYNO.Core.System", "info", version=1)
     new_fw = (after.get("data") or {}).get("firmware_ver") if after.get("ok") else None
     lines.append(f"Done         {new_fw or '(log in failed: ' + describe_error('SYNO.API.Auth', after) + ')'}")
@@ -446,14 +463,20 @@ def upgrade(s, args):
     if args.pat:
         # A hand-picked file: full images keep the legacy path; Update packs
         # are identified before anything is uploaded (same-size packs for
-        # other models download fine, so size proves nothing).
+        # other models download fine, so size proves nothing). A pack-magic
+        # file without a readable header is refused, not treated as a full
+        # image: its type is known, its identity is not.
         path = os.path.abspath(args.pat)
         with open(path, "rb") as f:
-            header = _pack_header(f.read(8192))
+            raw = f.read(8192)
+        header = _pack_header(raw)
         if header is None:
+            if raw[:4] == _PACK_MAGIC:
+                raise NasError(f"{path}: looks like an Update pack but its header is unreadable; "
+                               "refusing to upload an unidentified file")
             data["target"] = {"version": "(from file)", "build": None, "url": None, "file": path}
             ilines, idata = _install(s, args, path, expected_build=None, target_fw=None,
-                                     exact_target=False, rerun_hint=f"nas upgrade --pat {path} --yes")
+                                     target_match="micro", rerun_hint=f"nas upgrade --pat {path} --yes")
             return lines + ilines, {**data, **idata}
         unique = _box_unique()
         v = advisories.parse_dsm(fw)
@@ -466,7 +489,8 @@ def upgrade(s, args):
                           "build": v["build"], "update": int(header["smallfixnum"]),
                           "url": None, "file": path, "update_pack": True}
         ilines, idata = _install(s, args, path, expected_build=v["build"], target_fw=f"DSM {ver}",
-                                 exact_target=True, rerun_hint=f"nas upgrade --pat {path} --yes")
+                                 target_match="exact", rerun_hint=f"nas upgrade --pat {path} --yes",
+                                 initial_fw=fw)
         return lines + ilines, {**data, **idata}
 
     if advisories.update_gap_only(fw):
@@ -520,7 +544,8 @@ def upgrade(s, args):
             data["action"] = "downloaded"
             return lines, data
         ilines, idata = _install(s, args, path, expected_build=build, target_fw=target,
-                                 exact_target=True, rerun_hint="nas upgrade --install-update --yes")
+                                 target_match="exact", rerun_hint="nas upgrade --install-update --yes",
+                                 initial_fw=fw)
         return lines + ilines, {**data, **idata}
 
     pat = latest_pat(model, major, minor)
@@ -530,7 +555,7 @@ def upgrade(s, args):
     if pat_key < cur_key:
         if args.force:
             raise NasError(f"target DSM {pat['version']} is older than {fw}; --force does not downgrade")
-        lines.append("Already on the latest build; nothing to do (--force to reinstall).")
+        lines.append("Already on the latest build; nothing to do.")
         data.update(latest=pat, action="none")
         return lines, data
     if pat_key == cur_key and not args.force:
@@ -554,5 +579,6 @@ def upgrade(s, args):
 
     path = _download(pat["url"], args.download_dir)
     ilines, idata = _install(s, args, path, expected_build=pat["build"],
-                             target_fw="DSM " + pat["version"], exact_target=False)
+                             target_fw="DSM " + pat["version"], target_match="micro",
+                             initial_fw=fw)
     return lines + ilines, {**data, **idata}
