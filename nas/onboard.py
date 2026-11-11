@@ -333,8 +333,9 @@ def doctor(args, config_error: str | None = None):
         v = advisories.dsm_verdict(sysinfo.get("firmware_ver", ""))
         if v["status"] == "patched":
             hint = ""
-        elif advisories.needs_control_panel_update(sysinfo.get("firmware_ver", "")):
-            hint = "install the pending Update in Control Panel > Update & Restore"
+        elif advisories.update_gap_only(sysinfo.get("firmware_ver", "")):
+            hint = ("run `nas upgrade --dry-run` for the verified Update pack, then "
+                    "`nas upgrade --install-update --yes` (or Control Panel > Update & Restore)")
         else:
             hint = "nas upgrade --dry-run, then nas incident fix --upgrade"
         add("dsm_version", "ok" if v["status"] == "patched" else "fail" if v["status"] in ("vulnerable", "no_fix_for_branch")

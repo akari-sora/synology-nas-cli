@@ -5,24 +5,36 @@ Flow: pick the .pat (official download or --pat) → SYNO.Core.Upgrade.Patch upl
 → SYNO.Core.Upgrade.PreCheck start (prints Synology's notes) → SYNO.Core.Upgrade
 start (only with --yes) → wait for the reboot and for SessionData
 `dsm_upgrade_all_done`. Logins return 499 until that flag is true.
+
+Update packs (7.4.1-90080 Update 1, not a new build) live apart from full
+images: `.../criticalupdate/update_pack/<build>-<nano>/synology_<arch>_<model>.pat`.
+When every open advisory is fixed by an Update on the installed build, the
+Update pack route is tried first; installing it needs the explicit
+`--install-update` flag on top of `--yes` (the pack flow has never been
+observed end to end on a real box). Every pack is identified by the header
+dict at its start before anything is uploaded.
 """
 
 from __future__ import annotations
 
+import ast
+import hashlib
 import html
 import json
 import os
 import re
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import config
+from . import advisories, config
 from .backends import NasError, describe_error
 from .errors import can_prompt
 
 DOWNLOAD_API = "https://www.synology.com/api/support/findDownloadInfo"
+UPDATE_PACK_URL = "https://global.synologydownload.com/download/DSM/criticalupdate/update_pack"
 SESSION_DATA = "/webapi/entry.cgi?api=SYNO.Core.Desktop.SessionData&version=1&method=getjs"
 
 
@@ -59,17 +71,151 @@ def latest_pat(model: str, cur_major: int, cur_minor: int) -> dict:
     raise NasError(f"no .pat download found for {model}")
 
 
-def _download(url: str, dest_dir: str) -> str:
-    name = urllib.parse.unquote(urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1])
-    os.makedirs(dest_dir, exist_ok=True)
-    path = os.path.join(dest_dir, name)
+def _latest_nano(info: dict, build: int):
+    """Newest published Update number for `build`, or None when the API lists none.
+
+    The download API only links full images, but each item carries the newest
+    Update for its build (`latest_nano`).
+    """
+    for block in (info.get("system") or {}).get("detail") or []:
+        for item in block.get("items") or []:
+            try:
+                same = int(item.get("build_num")) == build
+                nano = int(item.get("latest_nano"))
+            except (TypeError, ValueError):
+                continue
+            if same:
+                return nano
+    return None
+
+
+_PACK_RE = re.compile(rb"\{'archive_type'\s*:\s*'update_pack'.*?\}", re.S)
+
+
+def _pack_header(data: bytes):
+    """The identity dict at the start of an Update pack, or None.
+
+    Verified against real packs: after the magic the file carries e.g.
+    `{'archive_type': 'update_pack', 'platform': 'braswell', 'buildnum':
+    '90080', 'major': '7', 'minor': '4', 'productversion': '7.4.1',
+    'smallfixnum': 1, 'unique': 'synology_braswell_716+'}. Full images use a
+    different magic and have no such header.
+    """
+    m = _PACK_RE.search(data or b"")
+    if not m:
+        return None
+    try:
+        header = ast.literal_eval(m.group(0).decode("ascii"))
+    except ValueError:
+        return None
+    return header if isinstance(header, dict) else None
+
+
+def _check_update_pack(path: str, *, unique: str, build: int, branch3: str,
+                       cur_update: int, min_update: int) -> dict:
+    """Refuse to upload `path` unless its header names exactly this box's fix.
+
+    Same-size packs for other models download fine, so the HTTP status and the
+    file size prove nothing; the header is the guarantee. Returns the header.
+    """
+    with open(path, "rb") as f:
+        header = _pack_header(f.read(8192))
+    problems = []
+    if header is None:
+        problems.append("no update-pack header found")
+    else:
+        if header.get("unique") != unique:
+            problems.append(f"pack is for {header.get('unique')}, this box is {unique}")
+        if str(header.get("buildnum")) != str(build):
+            problems.append(f"pack is build {header.get('buildnum')}, this box is build {build}")
+        if header.get("productversion") != branch3:
+            problems.append(f"pack is for {header.get('productversion')}, this box is {branch3}")
+        try:
+            small = int(header.get("smallfixnum"))
+        except (TypeError, ValueError):
+            small = None
+            problems.append("pack header has no smallfixnum")
+        if small is not None:
+            if small <= cur_update:
+                problems.append(f"pack is Update {small}, this box is already on Update {cur_update}")
+            if small < min_update:
+                problems.append(f"pack is Update {small}, the advisory needs Update {min_update}")
+    if problems:
+        raise NasError(f"{path}: not this box's Update pack ({'; '.join(problems)})")
+    return header
+
+
+def _update_pack_url(unique: str, build: int, nano: int) -> str:
+    """`.../criticalupdate/update_pack/<build>-<nano>/synology_<arch>_<model>.pat`."""
+    name = urllib.parse.quote(unique + ".pat", safe="")
+    return f"{UPDATE_PACK_URL}/{build:d}-{nano:d}/{name}"
+
+
+def _require_idle(s) -> None:
+    """Refuse to stage anything while DSM itself is updating.
+
+    The CLI and DSM share one staging area: uploading over DSM's own download
+    (weekly auto-install included) or cleaning its staged pack breaks it.
+    An unreadable status only warns: old DSM releases may not answer this API.
+    """
+    try:
+        st = s.call("SYNO.Core.Upgrade", "status", version=1)
+    except NasError as e:
+        _log(f"warning: cannot read upgrade status ({e}); proceeding")
+        return
+    data = (st.get("data") if st.get("ok") else None) or {}
+    if data.get("status", "none") != "none":
+        raise NasError(f"DSM is busy (upgrade status {data.get('status')}); "
+                       "wait for Control Panel > Update & Restore to finish, then retry")
+
+
+def _head(url: str) -> tuple:
+    """HEAD request: (http status, Content-Length, ETag without quotes). 404s return, not raise."""
     req = urllib.request.Request(url, method="HEAD")
-    with urllib.request.urlopen(req, timeout=30) as r:
-        size = int(r.headers.get("Content-Length") or 0)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            status = r.status
+            size = int(r.headers.get("Content-Length") or 0)
+            etag = (r.headers.get("ETag") or "").strip().strip('"')
+    except urllib.error.HTTPError as e:
+        return e.code, 0, ""
+    return status, size, etag
+
+
+def _check_md5(path: str, etag: str) -> None:
+    """When the CDN ETag is a bare MD5, the downloaded file must match it. Anything else: skip."""
+    if not re.fullmatch(r"[0-9a-fA-F]{32}", etag or ""):
+        return
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    if h.hexdigest().lower() != etag.lower():
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        raise NasError(f"{path}: checksum mismatch (ETag {etag}); deleted, download again")
+
+
+def _download(url: str, dest_dir: str, subdir: str | None = None, md5: str | None = None) -> str:
+    """Fetch `url` into `dest_dir[/subdir]`, skipping the download when size matches.
+
+    `subdir` keeps same-named packs apart: every Update pack for a box is called
+    `synology_<arch>_<model>.pat` whatever the build or Update. `md5` (a CDN
+    ETag) is verified after the download when it looks like a bare MD5.
+    """
+    name = urllib.parse.unquote(urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1])
+    dest = os.path.join(dest_dir, subdir) if subdir else dest_dir
+    os.makedirs(dest, exist_ok=True)
+    path = os.path.join(dest, name)
+    _status, size, _etag = _head(url)
     if size and os.path.exists(path) and os.path.getsize(path) == size:
         _log(f"using cached {path} ({size:,} bytes)")
+        if md5:
+            _check_md5(path, md5)
         return path
-    _log(f"downloading {name} ({size:,} bytes) to {dest_dir}")
+    _log(f"downloading {name} ({size:,} bytes) to {dest}")
     tmp = path + ".part"
     with urllib.request.urlopen(url, timeout=60) as r, open(tmp, "wb") as f:
         done, last = 0, time.time()
@@ -81,6 +227,8 @@ def _download(url: str, dest_dir: str) -> str:
                 last = time.time()
     if size and os.path.getsize(tmp) != size:
         raise NasError(f"download size mismatch: got {os.path.getsize(tmp)}, expected {size}")
+    if md5:
+        _check_md5(tmp, md5)
     os.replace(tmp, path)
     return path
 
@@ -104,9 +252,19 @@ def _session_data(s) -> dict | None:
     return out
 
 
-def wait_until_ready(s, timeout: float, saw_down: bool = False) -> dict:
-    """Poll SessionData until DSM is back and `dsm_upgrade_all_done` is true."""
-    deadline, prev = time.time() + timeout, None
+def wait_until_ready(s, timeout: float, saw_down: bool = False, target_fw=None,
+                     exact_target: bool = True, expect_reboot: bool = True) -> dict:
+    """Poll SessionData until DSM is back and `dsm_upgrade_all_done` is true.
+
+    `target_fw` additionally requires the box to report that version afterwards:
+    exact (`_version_key`, Update included) when `exact_target`, else build-only
+    (`_version_tuple`). `dsm_upgrade_all_done` alone proves nothing, so a ready
+    box that never went down only counts when no reboot was expected; a box
+    that went down and came back on the old version is an error, not a success.
+    Logins during the wait answer 499 (not a password verdict); only 499s are
+    waited out, other login errors raise.
+    """
+    deadline, prev, last_ver = time.time() + timeout, None, 0.0
     while time.time() < deadline:
         sd = _session_data(s)
         state = "down" if sd is None else ("ready" if sd.get("dsm_upgrade_all_done") else "finishing")
@@ -115,8 +273,30 @@ def wait_until_ready(s, timeout: float, saw_down: bool = False) -> dict:
             prev = state
         if state == "down":
             saw_down = True
-        elif state == "ready" and saw_down:
-            return sd
+        elif state == "ready":
+            if target_fw is None:
+                if saw_down:
+                    return sd
+            elif expect_reboot and not saw_down:
+                pass  # all_done was already true before the install; keep waiting for the reboot
+            elif time.time() - last_ver >= 60:
+                last_ver = time.time()
+                try:
+                    d = s.call("SYNO.Core.System", "info", version=1)
+                    if not d.get("ok"):
+                        raise NasError(describe_error("SYNO.Core.System", d))
+                    actual = (d.get("data") or {}).get("firmware_ver", "")
+                except NasError as e:
+                    if "499" not in str(e):
+                        raise
+                    _log(f"{time.strftime('%H:%M:%S')} DSM not ready for login ({e}); waiting")
+                else:
+                    key = _version_key if exact_target else _version_tuple
+                    if key(actual) == key(target_fw):
+                        return sd
+                    if saw_down:
+                        raise NasError(f"DSM is back but still on {actual}, expected {target_fw}")
+                    _log(f"{time.strftime('%H:%M:%S')} DSM ready on {actual}, waiting for {target_fw}")
         time.sleep(15)
     raise NasError(f"DSM not ready after {int(timeout)}s")
 
@@ -141,56 +321,60 @@ def _version_key(fw: str) -> tuple[int, int, int, int]:
     return major, minor, build, update
 
 
-def upgrade(s, args):
-    if s.backend_name != "password":
-        raise NasError("`nas upgrade` needs --backend password (it uploads a file)")
+def _product_key(fw: str):
+    """(major, minor, micro, build, update): full ordering for upgrade routing.
 
-    if args.wait_only:
-        sd = wait_until_ready(s, args.timeout, saw_down=True)
-        return [f"DSM ready, dsm_upgrade_all_done = {sd.get('dsm_upgrade_all_done')}"], {"ready": True}
+    Unlike `_version_key` this sees micro versions, so 7.4.1-90080 counts as
+    newer than 7.4.0-90080 (same build). Parses both display and release forms.
+    """
+    v = advisories.parse_dsm(fw)
+    if not v:
+        raise NasError(f"cannot parse DSM version {fw!r}")
+    return tuple(int(x) for x in v["branch3"].split(".")) + (v["build"], v["update"])
 
-    sysinfo = s.call("SYNO.Core.System", "info", version=1)
-    if not sysinfo.get("ok"):
-        raise NasError("SYNO.Core.System.info: " + describe_error("SYNO.Core.System", sysinfo))
-    model, fw = sysinfo["data"]["model"], sysinfo["data"]["firmware_ver"]
-    major, minor, build = _version_tuple(fw)
-    lines = [f"Current      {model}  {fw}"]
-    data = {"model": model, "current": fw}
 
-    if args.pat:
-        pat = {"version": "(from file)", "build": None, "url": None, "file": os.path.abspath(args.pat)}
-    else:
-        pat = latest_pat(model, major, minor)
-        lines.append(f"Latest       DSM {pat['version']} (needs ≥ {pat['required_version']}-{pat['required_build']})")
-        lines.append(f"Download     {pat['url'].split('?')[0]}")
-        if pat["build"] <= build and not args.force:
-            if pat["build"] == build:
-                lines.append(f"Already on the newest full build (build {build}); nothing to download.")
-                lines.append("If DSM offers an Update for this build, install it in Control Panel > "
-                             "Update & Restore: `nas upgrade` only finds full builds "
-                             "(--force reinstalls this one).")
-            else:
-                lines.append("Already on the latest build; nothing to do (--force to reinstall).")
-            data.update(latest=pat, action="none")
-            return lines, data
-        if build < pat["required_build"]:
-            raise NasError(f"current build {build} is below the required {pat['required_build']}; "
-                           "install an intermediate version first (--pat FILE)")
-    data["target"] = pat
+def _box_unique() -> str:
+    """This box's pack filename stem (`synology_braswell_716+`), from config.
 
-    if args.dry_run:
-        lines.append("Dry run: nothing downloaded or uploaded.")
-        data["action"] = "dry-run"
-        return lines, data
+    No DSM API exposes it; the download API does not list Update packs, so it
+    is configured once per box instead of guessed per model.
+    """
+    unique = (config.get().get("dsm_unique") or "").strip()
+    if not unique:
+        raise NasError("cannot pick an Update pack: config `dsm_unique` is empty (on the NAS, "
+                       "`grep ^unique= /etc.defaults/synoinfo.conf`, e.g. synology_braswell_716+); "
+                       "or install the Update in Control Panel > Update & Restore")
+    return unique
 
-    path = pat.get("file") or _download(pat["url"], args.download_dir)
+
+def _install(s, args, path: str, *, expected_build, target_fw, exact_target: bool,
+             rerun_hint: str = "nas upgrade --yes"):
+    """Upload → PreCheck → start → wait, shared by the full and pack routes.
+
+    `expected_build` (None skips the check) must match the upload echo or the
+    staged file is cleaned and nothing starts. `target_fw` is confirmed after
+    the wait; a box that comes back on the old version is an error.
+    """
+    lines, data = [], {}
+    _require_idle(s)
     _log(f"uploading {os.path.basename(path)} to the NAS")
     up = s.upload("SYNO.Core.Upgrade.Patch", "upload", 1, {"target": "active"}, path)
     if not up.get("ok"):
         raise NasError("Patch upload: " + describe_error("SYNO.Core.Upgrade.Patch", up))
-    lines.append(f"Uploaded     build {up['data'].get('buildnumber')} ({up['data'].get('upgradetype')}), "
-                 f"reboot: {up['data'].get('reboot')}")
-    data["uploaded"] = up["data"]
+    got = up.get("data") or {}
+    lines.append(f"Uploaded     build {got.get('buildnumber')} ({got.get('upgradetype')}), "
+                 f"reboot: {got.get('reboot')}")
+    data["uploaded"] = got
+    if expected_build is not None and got.get("buildnumber") is not None \
+            and str(got.get("buildnumber")) != str(expected_build):
+        s.call("SYNO.Core.Upgrade.Patch", "clean", version=1)
+        raise NasError(f"upload reported build {got.get('buildnumber')}, expected {expected_build}; "
+                       "staged file cleaned, nothing started")
+    if got.get("buildnumber") is None:
+        _log("warning: upload did not echo a build number; continuing without the identity check")
+    expect_reboot = got.get("reboot") not in (False, "false", "0", 0)
+    if got.get("upgradetype") is None:
+        _log("warning: upload did not report an upgradetype; continuing")
 
     pre = s.call("SYNO.Core.Upgrade.PreCheck", "start", version=1, params={"lang": args.lang, "type": "patch"},
                  timeout=300)
@@ -216,25 +400,159 @@ def upgrade(s, args):
         if answer not in ("y", "yes"):
             s.call("SYNO.Core.Upgrade.Patch", "clean", version=1)
             lines.append("Staged patch cleaned: PreCheck reported notes and the install was not confirmed. "
-                         "Read them, then run `nas upgrade --yes`.")
+                         f"Read them, then run `{rerun_hint}`.")
             data["action"] = "precheck-notes-not-confirmed"
             return lines, data
 
     if not can_continue or not args.yes:
         s.call("SYNO.Core.Upgrade.Patch", "clean", version=1)
         lines.append("Staged patch cleaned. " + ("PreCheck blocks this upgrade." if not can_continue
-                                                  else "Re-run with --yes to install."))
+                                                  else f"Re-run with {rerun_hint} to install."))
         data["action"] = "precheck-only"
         return lines, data
 
     st = s.call("SYNO.Core.Upgrade", "start", version=1, params={"force": True, "type": "patch"})
     if not st.get("ok"):
         raise NasError("Upgrade start: " + describe_error("SYNO.Core.Upgrade", st))
-    _log("upgrade started; the NAS will reboot")
+    data["start"] = st.get("data") or {}
+    _log("upgrade started; the NAS will reboot" if expect_reboot else "upgrade started")
     s.backend._sid = s.backend._token = None  # the session dies with the reboot
-    wait_until_ready(s, args.timeout)
+    wait_until_ready(s, args.timeout, target_fw=target_fw, exact_target=exact_target,
+                     expect_reboot=expect_reboot)
     after = s.call("SYNO.Core.System", "info", version=1)
     new_fw = (after.get("data") or {}).get("firmware_ver") if after.get("ok") else None
     lines.append(f"Done         {new_fw or '(log in failed: ' + describe_error('SYNO.API.Auth', after) + ')'}")
     data.update(action="installed", after=new_fw)
     return lines, data
+
+
+def upgrade(s, args):
+    if s.backend_name != "password":
+        raise NasError("`nas upgrade` needs --backend password (it uploads a file)")
+
+    if args.wait_only:
+        sd = wait_until_ready(s, args.timeout, saw_down=True)
+        return [f"DSM ready, dsm_upgrade_all_done = {sd.get('dsm_upgrade_all_done')}"], {"ready": True}
+
+    sysinfo = s.call("SYNO.Core.System", "info", version=1)
+    if not sysinfo.get("ok"):
+        raise NasError("SYNO.Core.System.info: " + describe_error("SYNO.Core.System", sysinfo))
+    model, fw = sysinfo["data"]["model"], sysinfo["data"]["firmware_ver"]
+    major, minor, build = _version_tuple(fw)
+    cur_key = _product_key(fw)
+    lines = [f"Current      {model}  {fw}"]
+    data = {"model": model, "current": fw}
+
+    if args.pat:
+        # A hand-picked file: full images keep the legacy path; Update packs
+        # are identified before anything is uploaded (same-size packs for
+        # other models download fine, so size proves nothing).
+        path = os.path.abspath(args.pat)
+        with open(path, "rb") as f:
+            header = _pack_header(f.read(8192))
+        if header is None:
+            data["target"] = {"version": "(from file)", "build": None, "url": None, "file": path}
+            ilines, idata = _install(s, args, path, expected_build=None, target_fw=None,
+                                     exact_target=False, rerun_hint=f"nas upgrade --pat {path} --yes")
+            return lines + ilines, {**data, **idata}
+        unique = _box_unique()
+        v = advisories.parse_dsm(fw)
+        need = advisories.needed_update(fw) or 0
+        header = _check_update_pack(path, unique=unique, build=v["build"], branch3=v["branch3"],
+                                    cur_update=v["update"], min_update=need)
+        ver = f"{header['productversion']}-{header['buildnum']} Update {header['smallfixnum']}"
+        lines.append(f"Pack         DSM {ver} (header ok: {header['unique']})")
+        data["target"] = {"version": f"{header['productversion']}-{header['buildnum']}-{header['smallfixnum']}",
+                          "build": v["build"], "update": int(header["smallfixnum"]),
+                          "url": None, "file": path, "update_pack": True}
+        ilines, idata = _install(s, args, path, expected_build=v["build"], target_fw=f"DSM {ver}",
+                                 exact_target=True, rerun_hint=f"nas upgrade --pat {path} --yes")
+        return lines + ilines, {**data, **idata}
+
+    if advisories.update_gap_only(fw):
+        # Every open advisory is an Update on this build: the Update pack
+        # route, not a full image (F4: this check comes before any build
+        # lookup, so 7.3.2-86009 Update 4 no longer errors on 7.4's requirement).
+        v = advisories.parse_dsm(fw)
+        need = advisories.needed_update(fw)
+        unique = _box_unique()
+        nano = _latest_nano(_download_info(model, major, minor), build)
+        if nano is None:
+            lines.append(f"Synology lists no Update pack info for build {build}; install the Update in "
+                         "Control Panel > Update & Restore.")
+            data.update(action="none")
+            return lines, data
+        if nano < need:
+            lines.append(f"Synology's newest Update for build {build} is Update {nano}, but the advisory needs "
+                         f"Update {need}; nothing to download (retry after Synology publishes it, or check "
+                         "Control Panel > Update & Restore).")
+            data.update(pack={"update": nano, "needed": need}, action="none")
+            return lines, data
+        url = _update_pack_url(unique, build, nano)
+        status, size, etag = _head(url)
+        pack = {"update": nano, "needed": need, "url": url, "status": status, "size": size}
+        if status != 200:
+            lines.append(f"No Update pack at {url} (HTTP {status}); install Update {nano} in "
+                         "Control Panel > Update & Restore.")
+            data.update(pack=pack, action="none")
+            return lines, data
+        lines.append(f"Update pack DSM {v['branch3']}-{build} Update {nano} "
+                     f"({size:,} bytes, {url.split('?')[0]})")
+        data["pack"] = pack
+        if args.dry_run:
+            lines.append("Dry run: pack found; nothing downloaded or uploaded. "
+                         "Run without --dry-run to download and verify it, then "
+                         "`nas upgrade --install-update --yes` to install.")
+            data["action"] = "dry-run"
+            return lines, data
+        path = _download(url, args.download_dir, subdir=f"{build:d}-{nano:d}", md5=etag)
+        header = _check_update_pack(path, unique=unique, build=build, branch3=v["branch3"],
+                                    cur_update=v["update"], min_update=need)
+        target = f"DSM {header['productversion']}-{header['buildnum']} Update {header['smallfixnum']}"
+        lines.append(f"Verified     header ok: {header['unique']}, build {header['buildnum']}, "
+                     f"Update {header['smallfixnum']}")
+        data["target"] = {"version": f"{header['productversion']}-{header['buildnum']}-{header['smallfixnum']}",
+                          "build": build, "update": nano,
+                          "url": url, "file": path, "update_pack": True}
+        if not (getattr(args, "install_update", False) and args.yes):
+            lines.append(f"Run `nas upgrade --install-update --yes` to upload and install it "
+                         f"(or `nas upgrade --pat {path} --yes`).")
+            data["action"] = "downloaded"
+            return lines, data
+        ilines, idata = _install(s, args, path, expected_build=build, target_fw=target,
+                                 exact_target=True, rerun_hint="nas upgrade --install-update --yes")
+        return lines + ilines, {**data, **idata}
+
+    pat = latest_pat(model, major, minor)
+    lines.append(f"Latest       DSM {pat['version']} (needs ≥ {pat['required_version']}-{pat['required_build']})")
+    lines.append(f"Download     {pat['url'].split('?')[0]}")
+    pat_key = _product_key("DSM " + pat["version"])
+    if pat_key < cur_key:
+        if args.force:
+            raise NasError(f"target DSM {pat['version']} is older than {fw}; --force does not downgrade")
+        lines.append("Already on the latest build; nothing to do (--force to reinstall).")
+        data.update(latest=pat, action="none")
+        return lines, data
+    if pat_key == cur_key and not args.force:
+        # Same product version and build (a newer micro shares the build
+        # number, e.g. 7.4.0-90080 vs 7.4.1-90080, and does NOT land here).
+        lines.append(f"Already on the newest full build (build {build}); nothing to download.")
+        lines.append("If DSM offers an Update for this build, install it in Control Panel > "
+                     "Update & Restore: `nas upgrade` only finds full builds "
+                     "(--force reinstalls this one).")
+        data.update(latest=pat, action="none")
+        return lines, data
+    if build < pat["required_build"]:
+        raise NasError(f"current build {build} is below the required {pat['required_build']}; "
+                       "install an intermediate version first (--pat FILE)")
+    data["target"] = pat
+
+    if args.dry_run:
+        lines.append("Dry run: nothing downloaded or uploaded.")
+        data["action"] = "dry-run"
+        return lines, data
+
+    path = _download(pat["url"], args.download_dir)
+    ilines, idata = _install(s, args, path, expected_build=pat["build"],
+                             target_fw="DSM " + pat["version"], exact_target=False)
+    return lines + ilines, {**data, **idata}

@@ -200,6 +200,7 @@ Example ([`config.example.json`](config.example.json), what `nas config init` wr
 | `snapshot_shares` | `[]` | Shares whose scheduled snapshots `alert` watches. `incident` checks every share when empty. |
 | `snapshot_max_age_hours` | `26` | A scheduled snapshot older than this is "stale". |
 | `latest_dsm` | `""` | Newest build you expect for this model (e.g. `7.4.1-90080`); empty skips the `dsm_behind` alert. |
+| `dsm_unique` | `""` | This box's Update-pack filename stem (e.g. `synology_braswell_716+`; on the NAS: `grep ^unique= /etc.defaults/synoinfo.conf`). Empty disables automatic Update-pack lookup. |
 | `credentials.*` | see [Credentials](#credentials) | `source`, `op_username`, `op_password`, `op_otp`, `op_token_file`, `username`, `password_command`, `otp_command`, `store`, `store_service`. |
 | `session.cache_file` | `~/.cache/synology-nas-cli/session.json` | Where `nas login` caches the DSM session. Nothing is cached unless you run `nas login`. |
 | `session.device_token_file` | `~/.config/synology-nas-cli/device-token.json` | Trusted-device token from a 2FA login with `--trust-device`. |
