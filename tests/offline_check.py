@@ -8,7 +8,7 @@ import _env  # noqa: F401
 from nas import cli
 from nas.backends import _encode_params
 from nas.commands import is_read_method
-from nas.upgrade import _strip_html, _version_tuple
+from nas.upgrade import _strip_html, _version_key, _version_tuple
 from nas import advisories, commands
 
 a = cli.parse_args(["api", "SYNO.X", "list", "--version", "2", "k=v", "a=b"])
@@ -40,6 +40,13 @@ a = cli.parse_args(["config", "show"])
 assert a.action == "show", a
 assert _version_tuple("DSM 7.4.1-90080 Update 1") == (7, 4, 90080)
 assert _version_tuple("DSM 7.1.1-42962 Update 9") == (7, 1, 42962)
+# the Update number breaks ties on one build: Synology ships security fixes as Updates
+assert _version_key("DSM 7.4.1-90080 Update 0") == (7, 4, 90080, 0)
+assert _version_key("DSM 7.4.1-90080 Update 1") == (7, 4, 90080, 1)
+assert _version_key("7.4.1-90080-1") == (7, 4, 90080, 1)
+assert _version_key("DSM 7.4.1-90080 Update 0") < _version_key("7.4.1-90080-1")
+assert _version_key("DSM 7.4.1-90080 Update 1") > _version_key("7.4.1-90080")
+assert _version_key("DSM 7.3.2-86009 Update 4") < _version_key("DSM 7.3.2-86009 Update 5")
 assert _strip_html("<style>x</style><div><b>A</b><br>B&amp;C</div>") == "A\nB&C"
 
 # SA-26:13 compares (build, update) only. A higher micro version is not a substitute.
@@ -102,7 +109,19 @@ assert advisories.SA_26_19["published"] == "2026-11-10"
 later_micro = advisories.dsm_verdict("DSM 7.4.2-1")
 assert later_micro["advisories"]["sa_26_13"]["status"] == "vulnerable"
 assert later_micro["advisories"]["sa_26_19"]["status"] == "patched"
-assert later_micro["status"] == "vulnerable" and later_micro["fixed_in"] == "7.4-90075"
+# the only fix is on an older product version, so it is not offered as this box's fixed_in
+assert later_micro["status"] == "vulnerable" and "fixed_in" not in later_micro, later_micro
+# an Update on the build already installed is not a .pat download; the note says where it is installed
+u_gap = advisories.dsm_advisory_verdict("DSM 7.4.1-90080 Update 0", "sa_26_19")
+assert "Update & Restore" in u_gap["note"] and "nas upgrade --dry-run" not in u_gap["note"], u_gap
+for fw in ("DSM 7.3.2-86009 Update 4", "DSM 7.2.2-72806 Update 9", "DSM 7.2.1-69057 Update 12"):
+    assert "Update & Restore" in advisories.dsm_advisory_verdict(fw, "sa_26_19")["note"], fw
+# a fix on another branch or a lower micro keeps the "upgrade" hint
+assert "nas upgrade --dry-run" in advisories.dsm_advisory_verdict("DSM 7.4.0-90080 Update 1", "sa_26_19")["note"]
+assert "nas upgrade --dry-run" in advisories.dsm_advisory_verdict("DSM 7.3.1-86009 Update 5", "sa_26_19")["note"]
+# two branch notes are joined as sentences, not with a stray ".;"
+joined = advisories.dsm_verdict("DSM 7.1.1-42962 Update 9")["note"]
+assert ".;" not in joined and joined.count("is not covered by SA-26:") == 2, joined
 gap = advisories.dsm_verdict("DSM 7.3.2-86009 Update 4")
 assert gap["status"] == "vulnerable" and "SA-26:19" in gap["note"] and "patched" != gap["status"]
 # status JSON keeps sa_26_13 and does not call the box patched while SA-26:19 is open
@@ -142,6 +161,15 @@ closed = [f for f in alert.alert(_Alert("DSM 7.4.1-90080 Update 1"), args)[1] if
 assert closed == []
 old = [f for f in alert.alert(_Alert("DSM 7.1.1-42962 Update 9"), args)[1] if f["code"] == "dsm_unpatched"]
 assert old and "no_fix_for_branch" in old[0]["message"]
+# dsm_behind compares the Update too, so latest_dsm=7.4.1-90080-1 flags Update 0 but not Update 1
+from nas import config as _cfg
+_saved = _cfg.get()["latest_dsm"]
+_cfg.get()["latest_dsm"] = "7.4.1-90080-1"
+behind = [f for f in alert.alert(_Alert("DSM 7.4.1-90080 Update 0"), args)[1] if f["code"] == "dsm_behind"]
+assert behind and "7.4.1-90080-1" in behind[0]["message"], behind
+assert [f for f in alert.alert(_Alert("DSM 7.4.1-90080 Update 1"), args)[1] if f["code"] == "dsm_behind"] == []
+assert [f for f in alert.alert(_Alert("DSM 7.4.1-90080 Update 9"), args)[1] if f["code"] == "dsm_behind"] == []
+_cfg.get()["latest_dsm"] = _saved
 assert advisories.package_verdict("PHP7.4", "7.4.33-0120")["status"] == "vulnerable"
 assert advisories.package_verdict("PHP7.4", "7.4.33-0131")["status"] == "patched"
 assert advisories.package_verdict("PHP7.3", "7.3.0")["status"] == "no_fix"

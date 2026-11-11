@@ -129,6 +129,18 @@ def _version_tuple(fw: str) -> tuple[int, int, int]:
     return int(m.group(1)), int(m.group(2)), int(m.group(3))
 
 
+def _version_key(fw: str) -> tuple[int, int, int, int]:
+    """Same, plus the Update number: 'DSM 7.4.1-90080 Update 1' and '7.4.1-90080-1' are (7, 4, 90080, 1).
+
+    Synology ships a security fix for a build as an Update, so comparing the build alone
+    cannot see that 7.4.1-90080 Update 0 is older than 7.4.1-90080-1.
+    """
+    major, minor, build = _version_tuple(fw)
+    m = re.search(r"\d+\.\d+(?:\.\d+)?-\d+(?:(?:\s+Update\s+|-)(\d+))?", fw or "")
+    update = int(m.group(1)) if m and m.group(1) else 0
+    return major, minor, build, update
+
+
 def upgrade(s, args):
     if s.backend_name != "password":
         raise NasError("`nas upgrade` needs --backend password (it uploads a file)")
@@ -152,7 +164,13 @@ def upgrade(s, args):
         lines.append(f"Latest       DSM {pat['version']} (needs ≥ {pat['required_version']}-{pat['required_build']})")
         lines.append(f"Download     {pat['url'].split('?')[0]}")
         if pat["build"] <= build and not args.force:
-            lines.append("Already on the latest build; nothing to do (--force to reinstall).")
+            if pat["build"] == build:
+                lines.append(f"Already on the newest full build (build {build}); nothing to download.")
+                lines.append("If DSM offers an Update for this build, install it in Control Panel > "
+                             "Update & Restore: `nas upgrade` installs full .pat builds only "
+                             "(--force reinstalls this one).")
+            else:
+                lines.append("Already on the latest build; nothing to do (--force to reinstall).")
             data.update(latest=pat, action="none")
             return lines, data
         if build < pat["required_build"]:

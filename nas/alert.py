@@ -28,7 +28,7 @@ from .backends import NasError
 from .commands import _ip_of, fetch_connection_log, need, part, snapshot_state
 from .ioc import clean
 from .manage import _ts_data
-from .upgrade import _version_tuple
+from .upgrade import _version_key
 
 
 def default_state() -> str:
@@ -160,7 +160,7 @@ def alert(s, args):
             msg += f" ({verdict['note']})"
         add("critical", "dsm_unpatched", "condition", msg)
     latest = config.get()["latest_dsm"]
-    if latest and _version_tuple(fwver) < _version_tuple("DSM " + latest):
+    if latest and _version_key(fwver) < _version_key("DSM " + latest):
         add("warning", "dsm_behind", "condition", f"{fwver} is older than {latest}")
     upd, _ = part("SYNO.Core.Upgrade.Server", r_upd)
     if upd and ((upd.get("update") or {}).get("available") or (upd.get("promotion") or {}).get("available")):

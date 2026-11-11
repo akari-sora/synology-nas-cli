@@ -98,6 +98,10 @@ def _branch_match(v: dict, prefix: str) -> bool:
     return v["branch2"] == prefix
 
 
+def _branch_tuple(branch3: str) -> tuple:
+    return tuple(int(x) for x in branch3.split("."))
+
+
 def _meets(v: dict, build: int, update: int, release) -> bool:
     if release:
         current = tuple(int(x) for x in v["branch3"].split("."))
@@ -135,8 +139,14 @@ def dsm_advisory_verdict(firmware_ver: str, advisory: str) -> dict:
     patched = _meets(v, build, update, release)
     out = dict(meta, status="patched" if patched else "vulnerable", fixed_in=fixed_in)
     if not patched:
-        out["note"] = (f"{label}: update to {fixed_in} or later "
-                       "(`nas upgrade --dry-run` shows the newest build for this model)")
+        if v["build"] == build and v["update"] < update:
+            # The fix is an Update on the build already installed. Synology publishes no
+            # separate .pat for it, so `nas upgrade` cannot install it.
+            out["note"] = (f"{label}: this build needs Update {update}; install it in "
+                           "Control Panel > Update & Restore (`nas upgrade` installs full builds only)")
+        else:
+            out["note"] = (f"{label}: update to {fixed_in} or later "
+                           "(`nas upgrade --dry-run` shows the newest build for this model)")
     return out
 
 
@@ -146,16 +156,25 @@ def dsm_verdict(firmware_ver: str) -> dict:
     status = next(s for s in _STATUS_ORDER if any(v["status"] == s for v in results.values()))
     out = {"status": status, "advisories": results}
     if status != "patched":
+        current = parse_dsm(firmware_ver)
         for key in ("sa_26_19", "sa_26_13"):
-            if results[key]["status"] != "patched" and results[key].get("fixed_in"):
-                out["fixed_in"] = results[key]["fixed_in"]
-                break
+            v = results[key]
+            if v["status"] == "patched" or not v.get("fixed_in"):
+                continue
+            target = parse_dsm("DSM " + v["fixed_in"])
+            if current and target and _branch_tuple(target["branch3"]) < _branch_tuple(current["branch3"]):
+                continue            # that fix belongs to an older product version than this box runs
+            out["fixed_in"] = v["fixed_in"]
+            break
         notes = []
         for v in results.values():
             if v["status"] != "patched" and v.get("note") and v["note"] not in notes:
                 notes.append(v["note"])
         if notes:
-            out["note"] = "; ".join(notes)
+            text = notes[0]
+            for n in notes[1:]:
+                text += (" " if text.endswith(".") else "; ") + n
+            out["note"] = text
     return out
 
 

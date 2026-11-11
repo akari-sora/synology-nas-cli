@@ -1222,6 +1222,10 @@ def plan_upgrade(s, f, args) -> dict:
         for line in lines:
             print("  " + line, file=sys.stderr)
         if data.get("action") != "installed":
+            if data.get("action") == "none":
+                raise NasError("nothing to install: already on the newest full build; if DSM offers an Update "
+                               "for it, install that in Control Panel > Update & Restore, "
+                               "not with `nas upgrade` (which installs full .pat builds only)")
             raise NasError(f"upgrade did not install ({data.get('action')})")
 
     def verify(s_):
