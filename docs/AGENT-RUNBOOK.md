@@ -50,7 +50,7 @@ The password is never written to the config; the config file is mode 600 and hol
 nas doctor --json
 ```
 
-`{"checks": [{"name", "status": "ok|warn|fail|skip", "detail", "next_step"}], "ok"}`; exit 0 when no check is `fail`. Checks: `config`, `credentials`, `origin`, `tls`, `login`, `dsm_version`, `two_factor`, `capabilities`, `clock`. For each `fail`, run its `next_step` (a command) or relay it (a question), then run Step 3 again.
+`{"checks": [{"name", "status": "ok|warn|fail|skip", "detail", "next_step"}], "ok"}`; exit 0 when no check is `fail`. Checks: `config`, `credentials`, `origin`, `tls`, `login`, `dsm_version`, `two_factor`, `capabilities`, `clock`. `dsm_version` fails when SA-26:13 or SA-26:19 is unpatched (a build past SA-26:13 can still miss SA-26:19). For each `fail`, run its `next_step` (a command) or relay it (a question), then run Step 3 again.
 
 ## Step 4: audit
 

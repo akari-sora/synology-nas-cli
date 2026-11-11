@@ -120,6 +120,7 @@ res = call("status")
 assert not res["isError"] and res["_meta"]["exit_code"] == 0
 st = json.loads(res["content"][0]["text"])
 assert st["firmware_ver"] == "DSM 7.4.1-90080 Update 1" and st["sa_26_13"]["status"] == "patched"
+assert st["sa_26_19"]["status"] == "patched" and st["dsm_patch"]["status"] == "patched"
 who = json.loads(call("whoami")["content"][0]["text"])
 assert who["account"] == "ops" and who["hostname"] == "nas-test"
 logs = json.loads(call("logs", since="2026-10-30 00:00", limit=100)["content"][0]["text"])

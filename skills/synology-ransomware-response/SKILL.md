@@ -1,13 +1,13 @@
 ---
 name: synology-ransomware-response
-description: Playbook for the C3RB3R / .L0CK3D ransomware campaign against Synology NAS (Synology-SA-24:20, SA-26:13, SA-26:14) using `nas incident` and `nas incident fix` from synology-nas-cli - audit, isolate, check for compromise, harden (firewall, QuickConnect, SMB1, AutoBlock, admin, snapshots, WORM trap), restore from snapshots. Use for ransomware, L0CK3D, LOCK3D, read-me3.txt, C3RB3R, encrypted NAS, Synology hacked, NAS exposed to internet, SA-24:20, SA-26:13, SA-26:14, PHP2Shell, harden Synology, 勒索, 群暉被加密.
+description: Playbook for the C3RB3R / .L0CK3D ransomware campaign against Synology NAS (Synology-SA-24:20, SA-26:13, SA-26:19, SA-26:14) using `nas incident` and `nas incident fix` from synology-nas-cli - audit, isolate, check for compromise, harden (firewall, QuickConnect, SMB1, AutoBlock, admin, snapshots, WORM trap), restore from snapshots. Use for ransomware, L0CK3D, LOCK3D, read-me3.txt, C3RB3R, encrypted NAS, Synology hacked, NAS exposed to internet, SA-24:20, SA-26:13, SA-26:19, SA-26:14, PHP2Shell, CVE-2026-76954, harden Synology, 勒索, 群暉被加密.
 ---
 
 # C3RB3R / `.L0CK3D` response with `nas`
 
 Background, advisory tables and sources: `docs/INCIDENT-C3RB3R.md`. Hardening checklist: `docs/HARDENING.md`. Lockout and recovery troubleshooting: `docs/TROUBLESHOOTING.md`. Agent onboarding sequence: `docs/AGENT-RUNBOOK.md`. CLI setup and credentials: the `synology-nas` skill.
 
-Signs of this campaign: files renamed `*.L0CK3D` (zero) or `*.LOCK3D`, a `read-me3.txt` ("C3RB3R INSTRUCTIONS") in each folder. Entry points: internet-reachable DSM on a build missing SA-24:20 (CVE-2024-10441) or SA-26:13 (CVE-2026-13639, CVE-2026-13684; DSM 7.1 and older get no SA-26:13 fix).
+Signs of this campaign: files renamed `*.L0CK3D` (zero) or `*.LOCK3D`, a `read-me3.txt` ("C3RB3R INSTRUCTIONS") in each folder. Entry points: internet-reachable DSM on a build missing SA-24:20 (CVE-2024-10441), SA-26:13 (CVE-2026-13639, CVE-2026-13684), or SA-26:19 (CVE-2026-76954, CVE-2026-85101; a build past SA-26:13 can still miss it). DSM 7.1 and older get no SA-26:13 or SA-26:19 fix. `dsm_version` is `PASS` only when both advisories are patched.
 
 ## 1. Audit (read-only)
 

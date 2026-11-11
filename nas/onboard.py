@@ -332,7 +332,7 @@ def doctor(args, config_error: str | None = None):
     if sysinfo:
         v = advisories.dsm_verdict(sysinfo.get("firmware_ver", ""))
         add("dsm_version", "ok" if v["status"] == "patched" else "fail" if v["status"] in ("vulnerable", "no_fix_for_branch")
-            else "warn", f"{sysinfo.get('firmware_ver')}: SA-26:13 {v['status']}",
+            else "warn", advisories.dsm_detail(sysinfo.get("firmware_ver", ""), v),
             "" if v["status"] == "patched" else "nas upgrade --dry-run, then nas incident fix --upgrade")
     else:
         add("dsm_version", "skip", "needs a login")

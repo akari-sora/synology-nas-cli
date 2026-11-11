@@ -9,7 +9,7 @@ from nas import cli
 from nas.backends import _encode_params
 from nas.commands import is_read_method
 from nas.upgrade import _strip_html, _version_tuple
-from nas import advisories
+from nas import advisories, commands
 
 a = cli.parse_args(["api", "SYNO.X", "list", "--version", "2", "k=v", "a=b"])
 assert a.version == 2 and a.params == ["k=v", "a=b"], a
@@ -42,13 +42,106 @@ assert _version_tuple("DSM 7.4.1-90080 Update 1") == (7, 4, 90080)
 assert _version_tuple("DSM 7.1.1-42962 Update 9") == (7, 1, 42962)
 assert _strip_html("<style>x</style><div><b>A</b><br>B&amp;C</div>") == "A\nB&C"
 
-# SA-26:13 / SA-26:14 verdicts
-assert advisories.dsm_verdict("DSM 7.4.1-90080 Update 1")["status"] == "patched"
-assert advisories.dsm_verdict("DSM 7.3.2-86009 Update 3")["status"] == "vulnerable"
-assert advisories.dsm_verdict("DSM 7.3.2-86009 Update 4")["status"] == "patched"
-assert advisories.dsm_verdict("DSM 7.2.1-69057 Update 12")["status"] == "patched"
-assert advisories.dsm_verdict("DSM 7.1.1-42962 Update 9")["status"] == "no_fix_for_branch"
-assert advisories.dsm_verdict("garbage")["status"] == "unknown"
+# SA-26:13 compares (build, update) only. A higher micro version is not a substitute.
+for fw in ("DSM 7.3.2-86009 Update 3", "DSM 7.4.1-1", "DSM 7.3.2-1 Update 0"):
+    assert advisories.dsm_advisory_verdict(fw, "sa_26_13")["status"] == "vulnerable", fw
+
+# (firmware, SA-26:13, SA-26:19, aggregate). Boundaries are the build just below
+# and at each fixed release. 7.5 is an unlisted future branch; 7.1 has no fix.
+CASES = [
+    ("DSM 7.4.1-90074", "vulnerable", "vulnerable", "vulnerable"),
+    ("DSM 7.4.1-90075", "patched", "vulnerable", "vulnerable"),
+    ("DSM 7.4.1-90080", "patched", "vulnerable", "vulnerable"),
+    ("DSM 7.4.1-90080 Update 0", "patched", "vulnerable", "vulnerable"),
+    ("DSM 7.4.1-90080 Update 1", "patched", "patched", "patched"),
+    ("7.4.1-90080-1", "patched", "patched", "patched"),
+    ("DSM 7.4.1-90080 Update 2", "patched", "patched", "patched"),
+    ("DSM 7.4.0-90080 Update 1", "patched", "vulnerable", "vulnerable"),
+    ("DSM 7.4.1-1", "vulnerable", "vulnerable", "vulnerable"),
+    ("DSM 7.4.2-1", "vulnerable", "patched", "vulnerable"),
+    ("DSM 7.3.2-86009 Update 3", "vulnerable", "vulnerable", "vulnerable"),
+    ("DSM 7.3.2-86009 Update 4", "patched", "vulnerable", "vulnerable"),
+    ("DSM 7.3.2-86009 Update 5", "patched", "patched", "patched"),
+    ("DSM 7.3.2-1 Update 0", "vulnerable", "vulnerable", "vulnerable"),
+    ("DSM 7.3.1-86009 Update 5", "patched", "vulnerable", "vulnerable"),
+    ("DSM 7.2.2-72806 Update 8", "vulnerable", "vulnerable", "vulnerable"),
+    ("DSM 7.2.2-72806 Update 9", "patched", "vulnerable", "vulnerable"),
+    ("DSM 7.2.2-72806 Update 10", "patched", "patched", "patched"),
+    ("DSM 7.2.1-69057 Update 11", "vulnerable", "vulnerable", "vulnerable"),
+    ("DSM 7.2.1-69057 Update 12", "patched", "vulnerable", "vulnerable"),
+    ("DSM 7.2.1-69057 Update 13", "patched", "patched", "patched"),
+    ("DSM 7.5.0-100000", "unknown", "unknown", "unknown"),
+    ("DSM 7.5-100000", "unknown", "unknown", "unknown"),
+    ("DSM 7.1.1-42962 Update 9", "no_fix_for_branch", "no_fix_for_branch", "no_fix_for_branch"),
+    ("DSM 7.2-64570 Update 4", "no_fix_for_branch", "no_fix_for_branch", "no_fix_for_branch"),
+    ("garbage", "unknown", "unknown", "unknown"),
+]
+for fw, sa13, sa19, overall in CASES:
+    a = advisories.dsm_advisory_verdict(fw, "sa_26_13")
+    b = advisories.dsm_advisory_verdict(fw, "sa_26_19")
+    g = advisories.dsm_verdict(fw)
+    assert a["status"] == sa13, (fw, "sa_26_13", a)
+    assert b["status"] == sa19, (fw, "sa_26_19", b)
+    assert g["status"] == overall and g["advisories"]["sa_26_13"]["status"] == sa13, (fw, g)
+    assert g["advisories"]["sa_26_19"]["status"] == sa19, (fw, g)
+    if overall == "patched":
+        assert sa13 == "patched" and sa19 == "patched" and "fixed_in" not in g, (fw, g)
+    elif sa19 == "vulnerable":
+        assert overall != "patched" and g.get("fixed_in") == b["fixed_in"], (fw, g)
+assert advisories.dsm_advisory_verdict("DSM 7.4.1-90080 Update 1", "sa_26_13")["fixed_in"] == "7.4-90075"
+assert advisories.dsm_advisory_verdict("DSM 7.3.2-86009 Update 5", "sa_26_13")["fixed_in"] == "7.3-86009-4"
+assert advisories.dsm_advisory_verdict("DSM 7.2.2-72806 Update 10", "sa_26_13")["fixed_in"] == "7.2.2-72806-9"
+assert advisories.dsm_advisory_verdict("DSM 7.2.1-69057 Update 13", "sa_26_13")["fixed_in"] == "7.2.1-69057-12"
+assert advisories.dsm_advisory_verdict("DSM 7.4.1-90080 Update 1", "sa_26_19")["fixed_in"] == "7.4.1-90080-1"
+assert advisories.dsm_advisory_verdict("DSM 7.3.2-86009 Update 5", "sa_26_19")["fixed_in"] == "7.3.2-86009-5"
+assert advisories.dsm_advisory_verdict("DSM 7.2.2-72806 Update 10", "sa_26_19")["fixed_in"] == "7.2.2-72806-10"
+assert advisories.dsm_advisory_verdict("DSM 7.2.1-69057 Update 13", "sa_26_19")["fixed_in"] == "7.2.1-69057-13"
+assert advisories.dsm_advisory_verdict("DSM 7.4.1-90080", "sa_26_19")["cves"] == ["CVE-2026-76954", "CVE-2026-85101"]
+assert "cves" not in advisories.dsm_advisory_verdict("DSM 7.4.1-90080", "sa_26_13")
+assert advisories.SA_26_19["published"] == "2026-11-10"
+later_micro = advisories.dsm_verdict("DSM 7.4.2-1")
+assert later_micro["advisories"]["sa_26_13"]["status"] == "vulnerable"
+assert later_micro["advisories"]["sa_26_19"]["status"] == "patched"
+assert later_micro["status"] == "vulnerable" and later_micro["fixed_in"] == "7.4-90075"
+gap = advisories.dsm_verdict("DSM 7.3.2-86009 Update 4")
+assert gap["status"] == "vulnerable" and "SA-26:19" in gap["note"] and "patched" != gap["status"]
+# status JSON keeps sa_26_13 and does not call the box patched while SA-26:19 is open
+class _Sys:
+    def call(self, api, method, params=None, version=None, timeout=None):
+        return {"ok": True, "data": {"model": "DS000", "firmware_ver": "DSM 7.3.2-86009 Update 4",
+                                     "firmware_date": "2026-01-01", "up_time": "1:00:00",
+                                     "time": "2026-11-11 12:00:00", "sys_temp": 40, "ram_size": 4096}}
+lines, data = commands.status(_Sys(), cli.parse_args(["status"]))
+assert data["sa_26_13"]["status"] == "patched" and data["sa_26_13"]["advisory"] == "SA-26:13"
+assert data["sa_26_19"]["status"] == "vulnerable" and data["dsm_patch"]["status"] == "vulnerable"
+text = "\n".join(lines)
+assert "SA-26:13     patched" in text and "SA-26:19     vulnerable" in text
+assert "DSM patch    vulnerable" in text and "DSM patch    patched" not in text
+# alert fires for an SA-26:19 gap and stays quiet when both advisories are patched
+class _Alert:
+    def __init__(self, fw):
+        self.fw = fw
+    def call_many(self, calls):
+        out = []
+        for c in calls:
+            if c["api"] == "SYNO.Core.System":
+                out.append({"ok": True, "data": {"firmware_ver": self.fw, "time": "2026-11-11 12:00:00",
+                                                 "up_time": "1:00:00"}})
+            elif c["api"] == "SYNO.Core.Security.Firewall":
+                out.append({"ok": True, "data": {"enable_firewall": True}})
+            else:
+                out.append({"ok": True, "data": {}})
+        return out
+    def call(self, *a, **k):
+        return {"ok": True, "data": {"items": [], "total": 0}}
+from nas import alert
+args = cli.parse_args(["alert", "--no-update"])
+open_19 = [f for f in alert.alert(_Alert("DSM 7.3.2-86009 Update 4"), args)[1] if f["code"] == "dsm_unpatched"]
+assert open_19 and "SA-26:19 vulnerable" in open_19[0]["message"] and "SA-26:13 patched" in open_19[0]["message"]
+closed = [f for f in alert.alert(_Alert("DSM 7.4.1-90080 Update 1"), args)[1] if f["code"] == "dsm_unpatched"]
+assert closed == []
+old = [f for f in alert.alert(_Alert("DSM 7.1.1-42962 Update 9"), args)[1] if f["code"] == "dsm_unpatched"]
+assert old and "no_fix_for_branch" in old[0]["message"]
 assert advisories.package_verdict("PHP7.4", "7.4.33-0120")["status"] == "vulnerable"
 assert advisories.package_verdict("PHP7.4", "7.4.33-0131")["status"] == "patched"
 assert advisories.package_verdict("PHP7.3", "7.3.0")["status"] == "no_fix"

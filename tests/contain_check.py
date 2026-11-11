@@ -61,6 +61,10 @@ put("/proc/uptime", "10000.00 9000.00\n")
 os.makedirs(R + "/root", exist_ok=True)
 put("/bin/libgld", "ELF-libgld")
 put("/tmp/.x/enc", "ELF-enc")
+# save-exe copies each candidate's path. A missing file aborts the rest of the
+# copy (pre-existing); these two candidates otherwise have no file on disk.
+put("/opt/miner/bin/m", "ELF-miner")
+put("/usr/bin/evilcrypt", "ELF-evil")
 proc(101, "/usr/syno/sbin/synoscgi", "synoscgi", [(101, "S")], cpu_ticks=1000)
 proc(202, "/bin/libgld", "libgld", [(202, "T"), (203, "T")])
 proc(303, "/tmp/.x/enc (deleted)", "enc", [(303, "T"), (304, "D")],

@@ -6,7 +6,7 @@ A practical hardening checklist for Synology DSM 7 systems, built from Synology 
 
 | # | Area | Check command | Apply command |
 |---|---|---|---|
-| 1 | DSM version & security patches (SA-26:13, SA-24:20) | `nas status`, `nas doctor`, `nas incident` | `nas upgrade --yes` or `nas incident fix --upgrade --yes` |
+| 1 | DSM version & security patches (SA-26:19, SA-26:13, SA-24:20) | `nas status`, `nas doctor`, `nas incident` | `nas upgrade --yes` or `nas incident fix --upgrade --yes` |
 | 2 | Vulnerable or unused packages (SA-26:14 PHP2Shell) | `nas inventory`, `nas pkg list`, `nas incident` | `nas incident fix --only packages --yes`, `nas pkg stop ID`, `nas pkg uninstall ID` |
 | 3 | Default-deny DSM firewall on all interfaces | `nas net`, `nas exposure`, `nas incident --probe` | `nas incident fix --only firewall --yes` |
 | 4 | QuickConnect & router UPnP port forwarding off | `nas services`, `nas incident` | `nas incident fix --only quickconnect,router_port_forwarding --yes` |
@@ -23,16 +23,16 @@ A practical hardening checklist for Synology DSM 7 systems, built from Synology 
 
 ---
 
-## 1. Keep DSM on a supported, patched build (SA-26:13 & SA-24:20)
+## 1. Keep DSM on a supported, patched build (SA-26:19, SA-26:13 & SA-24:20)
 
-- **Why:** Pre-authentication remote code execution and arbitrary file read/write flaws in DSM — including CVE-2024-10441 in [Synology-SA-24:20](https://www.synology.com/en-global/security/advisory/Synology_SA_24_20) and CVE-2026-13684 / CVE-2026-13639 in [Synology-SA-26:13](https://www.synology.com/en-global/security/advisory/Synology_SA_26_13) ([CSA Singapore AL-2026-127](https://www.csa.gov.sg/alerts-and-advisories/alerts/al-2026-127/)) — bypass passwords and 2-step verification completely ([Synology C3RB3R statement](https://www.synology.com/en-global/company/news/article/C3RB3R)). Older branches (DSM 7.1 and earlier) receive no SA-26:13 fix, and DSM's automatic updater does not cross major/minor branch boundaries on its own, so a unit on DSM 7.1.1 can display "Your DSM version is up to date" while remaining vulnerable ([Synology DSM Update Help](https://kb.synology.com/zh-tw/DSM/help/DSM/AdminCenter/system_dsmupdate?version=7), [Synology Product Support Status](https://www.synology.com/en-global/products/status?model=DS)).
+- **Why:** Pre-authentication remote code execution and arbitrary file read/write flaws in DSM — including CVE-2024-10441 in [Synology-SA-24:20](https://www.synology.com/en-global/security/advisory/Synology_SA_24_20), CVE-2026-13684 / CVE-2026-13639 in [Synology-SA-26:13](https://www.synology.com/en-global/security/advisory/Synology_SA_26_13) ([CSA Singapore AL-2026-127](https://www.csa.gov.sg/alerts-and-advisories/alerts/al-2026-127/)), and CVE-2026-76954 (Auth API SQL injection, CVSS 9.8) / CVE-2026-85101 (rsync authentication bypass, CVSS 8.6) in [Synology-SA-26:19](https://www.synology.com/en-global/security/advisory/Synology_SA_26_19) (published 2026-11-10) — bypass passwords and 2-step verification completely ([Synology C3RB3R statement](https://www.synology.com/en-global/company/news/article/C3RB3R)). SA-26:19 is fixed in DSM 7.4.1-90080-1, 7.3.2-86009-5, 7.2.2-72806-10, and 7.2.1-69057-13 or later, which is newer than the SA-26:13 line, so a box can be past SA-26:13 and still be vulnerable. Older branches (DSM 7.1 and earlier) receive no SA-26:13 or SA-26:19 fix, and DSM's automatic updater does not cross major/minor branch boundaries on its own, so a unit on DSM 7.1.1 can display "Your DSM version is up to date" while remaining vulnerable ([Synology DSM Update Help](https://kb.synology.com/zh-tw/DSM/help/DSM/AdminCenter/system_dsmupdate?version=7), [Synology Product Support Status](https://www.synology.com/en-global/products/status?model=DS)).
 - **DSM UI path:**
   - English: `Control Panel > Update & Restore > DSM Update`
   - 繁體中文：`控制台 > 更新與還原 > 系統更新`
 - **`nas` commands:**
   ```bash
-  nas status                          # shows model, build, and SA-26:13 patch verdict
-  nas doctor                          # checks dsm_version against SA-26:13
+  nas status                          # model, build, SA-26:13, SA-26:19, and the overall DSM-patch verdict
+  nas doctor                          # dsm_version fails when SA-26:13 or SA-26:19 is unpatched
   nas upgrade --dry-run               # checks Synology's download API for a newer .pat
   nas upgrade --yes                   # downloads, runs PreCheck, installs, and reboots
   nas incident fix --upgrade --yes    # runs the upgrade as part of incident remediation
@@ -243,3 +243,4 @@ A practical hardening checklist for Synology DSM 7 systems, built from Synology 
 28. `[S28]` [IT-Connect: C3RB3R ransomware is hitting Synology NAS devices — how to protect yours](https://www.it-connect.tech/c3rb3r-ransomware-is-hitting-synology-nas-devices-how-to-protect-yours/)
 29. `[S29]` [CSA Singapore Alert AL-2026-127: Critical Vulnerabilities in Synology Products](https://www.csa.gov.sg/alerts-and-advisories/alerts/al-2026-127/)
 30. `[S30]` [Synology DSM Help: Hardware Security Key](https://kb.synology.com/en-global/DSM/help/DSM/SecureSignIn/hardware_security_key?version=7)
+31. `[S31]` [Synology-SA-26:19 DSM Security Advisory](https://www.synology.com/en-global/security/advisory/Synology_SA_26_19)

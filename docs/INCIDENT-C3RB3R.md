@@ -36,6 +36,19 @@ Public incident reference, indicators of compromise, CLI verification steps, and
 | DSM 7.2 | Not listed in SA-26:13 (upgrade to a fixed branch) | `7.2-64570-4` |
 | DSM 7.1 and older | Not listed in SA-26:13 (upgrade to a fixed branch) | `7.1.1-42962-7` / `6.2.4-25556-8` |
 
+### Synology-SA-26:19
+
+- **[primary]** Synology-SA-26:19 (published 2026-11-10, revision 1, Critical, Resolved, Mitigation "None") fixes two unauthenticated DSM flaws: CVE-2026-76954 (Auth API SQL injection, CWE-89, CVSS 3.1 9.8, arbitrary file read/write and denial of service) and CVE-2026-85101 (rsync authentication bypass, CWE-288, CVSS 3.1 8.6, read of specific files, arbitrary file write, and limited denial of service). Checked against the advisory page on 2026-11-11 ([Synology-SA-26:19](https://www.synology.com/en-global/security/advisory/Synology_SA_26_19)).
+- A build can be past the SA-26:13 fix and still be missing SA-26:19. `nas status`, `nas doctor`, `nas incident`, and `nas alert` report the two advisories separately. The overall DSM-patch verdict is patched only when both are. DSM 7.1 and older, and plain DSM 7.2, are not listed. A later branch that the advisory does not name (for example DSM 7.5) is reported as `unknown`, not patched.
+
+| DSM branch | SA-26:19 fixed release |
+|---|---|
+| DSM 7.4 | `7.4.1-90080-1` or above |
+| DSM 7.3 | `7.3.2-86009-5` or above |
+| DSM 7.2.2 | `7.2.2-72806-10` or above |
+| DSM 7.2.1 | `7.2.1-69057-13` or above |
+| DSM 7.2, DSM 7.1 and older | Not listed (no fix on that branch) |
+
 ### Synology-SA-26:14 ("PHP2Shell")
 
 - **[primary]** Synology-SA-26:14 (published 2026-10-22, updated 2026-10-26, Critical, Resolved) addresses CVE-2026-109618 and CVE-2026-109619 (CVSS 3.1 9.8 in Synology's advisory; CVSS v4.0 9.2 in NVD/CyberQ), which are PHP-core memory corruption and stale internal request-state flaws leading to remote code execution ([Synology-SA-26:14](https://www.synology.com/en-us/security/advisory/Synology_SA_26_14), [CyberQ, 2026-10-30](https://cyberq.tw/2026/10/30/synology-nas-c3rb3r-ransomware/)).
@@ -170,11 +183,11 @@ Equivalent by hand (as root): `xzcat -f /var/log/synoplugin.log* /var/log/synosc
 ### 4. Restore data from Btrfs snapshots or offline backups
 
 - **[community / press]** Verify that the target Btrfs snapshot (`Snapshot Replication > Snapshots > select shared folder > Restore to this snapshot` or `#snapshot` in File Station) or offline/off-site Hyper Backup version predates the earliest `read-me3.txt` timestamp before restoring ([CyberQ, 2026-10-30](https://cyberq.tw/2026/10/30/synology-nas-c3rb3r-ransomware/), [itnotetk, 2026-10-30](https://www.itnotetk.com/2026/10/30/synology-nas-c3rb3r-l0ck3d-ransomware/)).
-- **[primary / community]** After restoring or reinstalling DSM, update DSM to the SA-26:13 fixed build (`nas upgrade --yes`, and verify `/etc.defaults/VERSION` `smallfixnumber`), update or stop SA-26:14 packages, rotate all administrator and service passwords, and run `nas incident --scan --deep` to confirm a clean state before reconnecting ([Synology-SA-26:13](https://www.synology.com/en-global/security/advisory/Synology_SA_26_13), [Synology-SA-26:14](https://www.synology.com/en-us/security/advisory/Synology_SA_26_14), [itnotetk, 2026-10-30](https://www.itnotetk.com/2026/10/30/synology-nas-c3rb3r-l0ck3d-ransomware/)).
+- **[primary / community]** After restoring or reinstalling DSM, update DSM to a build that covers SA-26:19 and SA-26:13 (`nas upgrade --yes`, and verify `/etc.defaults/VERSION` `smallfixnumber`), update or stop SA-26:14 packages, rotate all administrator and service passwords, and run `nas incident --scan --deep` to confirm a clean state before reconnecting ([Synology-SA-26:19](https://www.synology.com/en-global/security/advisory/Synology_SA_26_19), [Synology-SA-26:13](https://www.synology.com/en-global/security/advisory/Synology_SA_26_13), [Synology-SA-26:14](https://www.synology.com/en-us/security/advisory/Synology_SA_26_14), [itnotetk, 2026-10-30](https://www.itnotetk.com/2026/10/30/synology-nas-c3rb3r-l0ck3d-ransomware/)).
 
 ## Prevention
 
-- **Patch DSM and packages:** Keep DSM on the latest SA-26:13 / SA-24:20 fixed build (`nas status`, `nas upgrade --yes`) and keep Package Center packages updated for SA-26:14 (`nas inventory`, `nas incident fix --only packages`) ([Synology-SA-26:13](https://www.synology.com/en-global/security/advisory/Synology_SA_26_13), [Synology-SA-26:14](https://www.synology.com/en-us/security/advisory/Synology_SA_26_14)).
+- **Patch DSM and packages:** Keep DSM on a build that covers SA-26:19, SA-26:13, and SA-24:20 (`nas status`, `nas upgrade --yes`) and keep Package Center packages updated for SA-26:14 (`nas inventory`, `nas incident fix --only packages`) ([Synology-SA-26:19](https://www.synology.com/en-global/security/advisory/Synology_SA_26_19), [Synology-SA-26:13](https://www.synology.com/en-global/security/advisory/Synology_SA_26_13), [Synology-SA-26:14](https://www.synology.com/en-us/security/advisory/Synology_SA_26_14)).
 - **Remove internet exposure:** Disable QuickConnect (`nas incident fix --only quickconnect`), disable UPnP router port-forwarding rules (`nas incident fix --only router_port_forwarding`), and enable a default-deny DSM firewall allowing only LAN/VPN subnets (`nas incident fix --only firewall`) ([Midnight Blue RISK:STATION](https://www.midnightblue.nl/research/riskstation), [Synology Firewall Help](https://kb.synology.com/en-global/DSM/help/DSM/AdminCenter/connection_security_firewall?version=7)).
 - **Harden authentication and protocols:** Disable the default `admin` account, enable 2-step verification, turn on AutoBlock, and set minimum SMB protocol to SMB2 (`nas incident fix --only admin_account,autoblock,smb_min_protocol`) ([Synology Security Tutorial](https://kb.synology.com/zh-tw/DSM/tutorial/How_to_add_extra_security_to_your_Synology_NAS)).
 - **Protect snapshots and offline backups:** Enable scheduled Btrfs snapshots (and Immutable Snapshots on supported models, while avoiding the WORM API lock on unsupported models via `nas incident fix --only snapshot_worm,snapshots --ransom-scan`) and maintain an offline or off-site 3-2-1 backup ([Synology Ransomware Prevention Tutorial](https://kb.synology.com/en-global/DSM/tutorial/How_can_I_prevent_ransomeware_attacks_on_my_Synology_device), [Synology WriteOnce KB](https://kb.synology.com/en-global/DSM/tutorial/which_synology_nas_models_support_WriteOnce_and_secure_snapshots)).

@@ -1,5 +1,5 @@
 """`nas incident`: audit a DSM box against the C3RB3R / .L0CK3D ransomware campaign
-(Synology-SA-26:13, SA-26:14), and `nas incident fix`: apply the hardening in one go.
+(Synology-SA-26:13, SA-26:19, SA-26:14), and `nas incident fix`: apply the hardening in one go.
 
 Audit (read-only): every item is PASS / WARN / FAIL / SKIP with a one-line hint;
 exit status 1 when any item is FAIL. --probe opens TCP connections to the public
@@ -236,18 +236,19 @@ def evaluate(f, args) -> list:
     add = items.append
     sysinfo, e_sys = f["sys"]
 
-    # 1. DSM build vs SA-26:13
+    # 1. DSM build vs SA-26:13 and SA-26:19 (PASS only when every tracked advisory is patched)
     if sysinfo is None:
         add(item("dsm_version", SKIP, f"cannot read DSM version: {e_sys}"))
     else:
         fw_ver = sysinfo.get("firmware_ver", "")
         v = advisories.dsm_verdict(fw_ver)
+        detail = advisories.dsm_detail(fw_ver, v)
         if v["status"] == "patched":
-            add(item("dsm_version", PASS, f"{fw_ver}: SA-26:13 patched (fixed in {v['fixed_in']})"))
+            add(item("dsm_version", PASS, detail))
         elif v["status"] == "unknown":
-            add(item("dsm_version", WARN, v["note"], "check Control Panel > Update & Restore"))
+            add(item("dsm_version", WARN, detail, "check Control Panel > Update & Restore"))
         else:
-            add(item("dsm_version", FAIL, f"{fw_ver}: SA-26:13 {v['status']}. {v.get('note', '')}".strip(),
+            add(item("dsm_version", FAIL, detail,
                      "nas upgrade --dry-run, then `nas incident fix --upgrade` (the NAS reboots)", "upgrade"))
 
     # 2. SA-26:14 packages
@@ -1226,7 +1227,7 @@ def plan_upgrade(s, f, args) -> dict:
     def verify(s_):
         d = need("SYNO.Core.System", s_.call("SYNO.Core.System", "info", version=1))
         v = advisories.dsm_verdict(d.get("firmware_ver", ""))
-        return v["status"] == "patched", f"{d.get('firmware_ver')}: SA-26:13 {v['status']}"
+        return v["status"] == "patched", advisories.dsm_detail(d.get("firmware_ver", ""), v)
 
     return _change("upgrade", "DSM", it["detail"] if it else "-", "newest official build for this model",
                    [call("SYNO.Core.Upgrade.Patch", "upload", 1, {"target": "active", "file": "<.pat>"}),

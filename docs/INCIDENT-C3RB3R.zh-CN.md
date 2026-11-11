@@ -36,6 +36,19 @@
 | DSM 7.2 | 未列入 SA-26:13（需升级至已修复的分支） | `7.2-64570-4` |
 | DSM 7.1 及更早版本 | 未列入 SA-26:13（需升级至已修复的分支） | `7.1.1-42962-7` / `6.2.4-25556-8` |
 
+### Synology-SA-26:19
+
+- **[一手来源]** Synology-SA-26:19（2026-11-10 发布，修订 1，Critical，Resolved，缓解措施“None”）修复两个未经身份验证的 DSM 漏洞：CVE-2026-76954（Auth API SQL 注入，CWE-89，CVSS 3.1 9.8，任意文件读写与拒绝服务）与 CVE-2026-85101（rsync 认证绕过，CWE-288，CVSS 3.1 8.6，读取特定文件、任意文件写入与有限拒绝服务）。2026-11-11 对照公告页核对（[Synology-SA-26:19](https://www.synology.com/en-global/security/advisory/Synology_SA_26_19)）。
+- 版本可以已经超过 SA-26:13 的修复线，却仍然缺少 SA-26:19。`nas status`、`nas doctor`、`nas incident` 与 `nas alert` 会分开报告这两则公告。整体 DSM 修补结论只有在两者都已修补时才是 patched。DSM 7.1 及更早版本，以及单纯的 DSM 7.2，都未列入。公告未列出的更新分支（例如 DSM 7.5）报告为 `unknown`，不会被当成已修补。
+
+| DSM 分支 | SA-26:19 修复版本 |
+|---|---|
+| DSM 7.4 | `7.4.1-90080-1` 或更高 |
+| DSM 7.3 | `7.3.2-86009-5` 或更高 |
+| DSM 7.2.2 | `7.2.2-72806-10` 或更高 |
+| DSM 7.2.1 | `7.2.1-69057-13` 或更高 |
+| DSM 7.2、DSM 7.1 及更早版本 | 未列入（该分支没有修复） |
+
 ### Synology-SA-26:14（“PHP2Shell”）
 
 - **[一手来源]** Synology-SA-26:14（2026-10-22 发布，2026-10-26 更新，严重级别 Critical，状态 Resolved）修复了 CVE-2026-109618 与 CVE-2026-109619（Synology 公告中 CVSS 3.1 评分为 9.8；NVD 与 CyberQ 中 CVSS v4.0 评分为 9.2），这两个漏洞属于 PHP 核心内存损坏与残留内部请求状态缺陷，可导致远程代码执行 ([Synology-SA-26:14](https://www.synology.com/en-us/security/advisory/Synology_SA_26_14), [CyberQ, 2026-10-30](https://cyberq.tw/2026/10/30/synology-nas-c3rb3r-ransomware/))。
@@ -170,11 +183,11 @@ NOP
 ### 4. 从 Btrfs 快照或离线备份恢复数据
 
 - **[社区 / 媒体报道]** 执行恢复前，请先确认目标 Btrfs 快照（`Snapshot Replication > Snapshots > select shared folder > Restore to this snapshot`（Snapshot Replication > 快照 > 选择共享文件夹 > 还原到此快照）或 File Station 中的 `#snapshot`）或离线/异地 Hyper Backup 备份版本的时间戳早于最早一份 `read-me3.txt` 的生成时间 ([CyberQ, 2026-10-30](https://cyberq.tw/2026/10/30/synology-nas-c3rb3r-ransomware/), [itnotetk, 2026-10-30](https://www.itnotetk.com/2026/10/30/synology-nas-c3rb3r-l0ck3d-ransomware/))。
-- **[一手来源 / 社区]** 恢复数据或重装 DSM 后，在重新接入网络前，请将 DSM 更新至 SA-26:13 修复版本（运行 `nas upgrade --yes`，并核实 `/etc.defaults/VERSION` 中的 `smallfixnumber`）、更新或停用 SA-26:14 涉及的套件、轮换所有管理员与服务密码，并运行 `nas incident --scan --deep` 确认系统处于干净状态 ([Synology-SA-26:13](https://www.synology.com/en-global/security/advisory/Synology_SA_26_13), [Synology-SA-26:14](https://www.synology.com/en-us/security/advisory/Synology_SA_26_14), [itnotetk, 2026-10-30](https://www.itnotetk.com/2026/10/30/synology-nas-c3rb3r-l0ck3d-ransomware/))。
+- **[一手来源 / 社区]** 恢复数据或重装 DSM 后，在重新接入网络前，请将 DSM 更新至同时覆盖 SA-26:19 与 SA-26:13 的修复版本（运行 `nas upgrade --yes`，并核实 `/etc.defaults/VERSION` 中的 `smallfixnumber`）、更新或停用 SA-26:14 涉及的套件、轮换所有管理员与服务密码，并运行 `nas incident --scan --deep` 确认系统处于干净状态 ([Synology-SA-26:19](https://www.synology.com/en-global/security/advisory/Synology_SA_26_19), [Synology-SA-26:13](https://www.synology.com/en-global/security/advisory/Synology_SA_26_13), [Synology-SA-26:14](https://www.synology.com/en-us/security/advisory/Synology_SA_26_14), [itnotetk, 2026-10-30](https://www.itnotetk.com/2026/10/30/synology-nas-c3rb3r-l0ck3d-ransomware/))。
 
 ## 防护建议
 
-- **及时修补 DSM 与套件：** 将 DSM 保持在最新的 SA-26:13 / SA-24:20 修复版本（`nas status`、`nas upgrade --yes`），并针对 SA-26:14 及时更新 Package Center（套件中心）中的套件（`nas inventory`、`nas incident fix --only packages`）([Synology-SA-26:13](https://www.synology.com/en-global/security/advisory/Synology_SA_26_13), [Synology-SA-26:14](https://www.synology.com/en-us/security/advisory/Synology_SA_26_14))。
+- **及时修补 DSM 与套件：** 将 DSM 保持在覆盖 SA-26:19、SA-26:13 与 SA-24:20 的修复版本（`nas status`、`nas upgrade --yes`），并针对 SA-26:14 及时更新 Package Center（套件中心）中的套件（`nas inventory`、`nas incident fix --only packages`）([Synology-SA-26:19](https://www.synology.com/en-global/security/advisory/Synology_SA_26_19), [Synology-SA-26:13](https://www.synology.com/en-global/security/advisory/Synology_SA_26_13), [Synology-SA-26:14](https://www.synology.com/en-us/security/advisory/Synology_SA_26_14))。
 - **消除公网暴露面：** 停用 QuickConnect（`nas incident fix --only quickconnect`）、停用 UPnP 路由器端口转发规则（`nas incident fix --only router_port_forwarding`），并启用默认拒绝（default-deny）、仅放行局域网/VPN 网段的 DSM 防火墙（`nas incident fix --only firewall`）([Midnight Blue RISK:STATION](https://www.midnightblue.nl/research/riskstation), [Synology Firewall Help](https://kb.synology.com/en-global/DSM/help/DSM/AdminCenter/connection_security_firewall?version=7))。
 - **加固身份验证与协议：** 停用默认 `admin` 账户、启用双重验证（2-step verification）、开启 AutoBlock（自动封锁），并将最低 SMB 协议版本设为 SMB2（`nas incident fix --only admin_account,autoblock,smb_min_protocol`）([Synology Security Tutorial](https://kb.synology.com/zh-tw/DSM/tutorial/How_to_add_extra_security_to_your_Synology_NAS))。
 - **保护快照与离线备份：** 启用定时 Btrfs 快照（并在受支持的机型上启用 Immutable Snapshots 不可变快照，同时通过 `nas incident fix --only snapshot_worm,snapshots --ransom-scan` 避免在不受支持的机型上触发 WORM API 锁死问题），并维护离线或异地的 3-2-1 备份策略 ([Synology Ransomware Prevention Tutorial](https://kb.synology.com/en-global/DSM/tutorial/How_can_I_prevent_ransomeware_attacks_on_my_Synology_device), [Synology WriteOnce KB](https://kb.synology.com/en-global/DSM/tutorial/which_synology_nas_models_support_WriteOnce_and_secure_snapshots))。
