@@ -10,7 +10,7 @@
 
 ![nas incident: audit, plan, fix](docs/assets/demo.gif)
 
-`nas`는 외부 의존성이 없는 Python CLI(표준 라이브러리만 사용, Python 3.8+ 지원으로 DSM 자체에서도 실행 가능)이자 Synology DSM 7 Web API용 stdio MCP 서버입니다. 상태, 상태 점검(health), 로그, 패키지, 볼륨, Tailscale, DSM 업그레이드, 웹훅으로 푸시되는 예약 상태 알림은 물론, 2026년 10월 인터넷에 노출된 Synology NAS 장비를 겨냥한 C3RB3R / `.L0CK3D` 캠페인(Synology-SA-24:20, SA-26:13, SA-26:14) 당시 구축된 침해 점검 및 조치 도구를 제공합니다.
+`nas`는 외부 의존성이 없는 Python CLI(표준 라이브러리만 사용, Python 3.8+ 지원으로 DSM 자체에서도 실행 가능)이자 Synology DSM 7 Web API용 stdio MCP 서버입니다. 상태, 상태 점검(health), 로그, 패키지, 볼륨, Tailscale, DSM 업그레이드, 웹훅으로 푸시되는 예약 상태 알림은 물론, 2026년 10월 인터넷에 노출된 Synology NAS 장비를 겨냥한 C3RB3R / `.L0CK3D` 캠페인(Synology-SA-24:20, SA-26:13, SA-26:19, SA-26:14) 당시 구축된 침해 점검 및 조치 도구를 제공합니다.
 
 Synology Inc.와 제휴되어 있지 않습니다(Not affiliated with Synology Inc.). "Synology", "DSM" 및 "QuickConnect"는 Synology Inc.의 상표입니다.
 
@@ -36,7 +36,7 @@ Use https://github.com/akari-sora/synology-nas-cli to audit and fix my Synology 
 
 1. **설치**: 저장소를 클론(또는 패키지를 설치)하고 `./bin/nas --version`을 확인합니다.
 2. **`nas setup`**: `nas setup --json --no-input ...`을 실행하여 `~/.config/synology-nas-cli/config.json`(권한 `0600`)을 작성하고, 자격 증명을 확인하기 위해 한 번 로그인한 뒤, 첫 연결 시 DSM의 TLS 인증서 SHA-256 지문을 고정(pin)합니다.
-3. **`nas doctor`**: `nas doctor --json`을 실행하여 설정, 자격 증명, 오리진(origin) 연결 가능 여부, TLS 고정 지문, 로그인, SA-26:13 기준 DSM 버전, 2단계 인증 상태, 관리자 권한, 시스템 시간 오차를 확인합니다.
+3. **`nas doctor`**: `nas doctor --json`을 실행하여 설정, 자격 증명, 오리진(origin) 연결 가능 여부, TLS 고정 지문, 로그인, SA-26:13 및 SA-26:19 기준 DSM 버전(둘 중 하나라도 미패치면 실패), 2단계 인증 상태, 관리자 권한, 시스템 시간 오차를 확인합니다.
 4. **`nas incident`**: `nas incident --json`(및 선택적으로 `--probe --scan`)을 실행하여 DSM 버전, 취약한 패키지, 방화벽, QuickConnect, UPnP 라우터 규칙, 공인 포트, 외부 및 실패한 로그인 기록, AutoBlock, SMB1, 기본 내장 `admin` 계정, 스냅샷 스케줄, 미지원 모델의 WORM 잠금 함정, 랜섬 노트, CVE-2024-10441 익스플로잇 시도를 읽기 전용으로 점검합니다.
 5. **계획 수립**: `nas incident fix --dry-run --json --ransom-scan`을 실행하여 예정된 모든 변경 사항(`before -> after`), 실제 호출될 DSM Web API, 해당 DSM 웹 UI 경로를 보여줍니다.
 6. **`nas incident fix --yes`**: 승인된 계획을 순서대로(`snapshot_worm` → `snapshots` → `packages` → `smb_min_protocol` → `quickconnect` → `router_port_forwarding` → `autoblock` → `admin_account` → `firewall`, 선택 사항인 `--rotate-password` 및 `--upgrade` 포함) 적용하고, 각 설정을 다시 읽어 검증한 뒤 점검을 다시 실행합니다.
@@ -71,7 +71,7 @@ flowchart LR
 
 | 항목 | `nas incident` 보고 내용 | `nas incident fix` 변경 내용 |
 |---|---|---|
-| `dsm_version` | DSM 빌드가 해당 브랜치의 SA-26:13 패치 빌드보다 오래되었거나 SA-26:13 패치가 없는 브랜치(DSM 7.1 이하)인 경우 `FAIL`, 패치된 경우 `PASS` | `--upgrade` 사용 시: 해당 모델의 최신 공식 `.pat` 파일을 다운로드하고 PreCheck를 실행한 뒤 설치 및 재부팅 |
+| `dsm_version` | 해당 브랜치에서 SA-26:13 또는 SA-26:19가 패치되지 않았거나, 패치가 없는 브랜치(DSM 7.1 이하)이면 `FAIL`입니다. 둘 다 패치된 경우에만 `PASS`입니다. `nas status`는 각 권고문과 전체 DSM 패치 판정을 따로 보여 줍니다 | `--upgrade` 사용 시: 해당 모델의 최신 공식 `.pat` 파일을 다운로드하고 PreCheck를 실행한 뒤 설치 및 재부팅 |
 | `sa_26_14_packages` | 설치된 패키지를 Synology-SA-26:14(Calendar, MailStation, PHP 7.3–8.4)와 대조: 취약한 버전이 실행 중이면 `FAIL`, 설치되어 있으나 중지된 상태면 `WARN` | 실행 중인 취약한 패키지를 중지 (`--only packages`) |
 | `firewall` | 방화벽이 꺼져 있고 NAS가 자체적으로 공인 IP를 보유한 경우(예: PPPoE 직접 연결) `FAIL`, NAT 뒤에서 꺼져 있으면 `WARN`, 또는 인터페이스가 일치하지 않는 트래픽을 허용하거나 규칙이 모든 소스(`source_ip: all`)를 허용하는 경우 `FAIL`/`WARN` | 방화벽을 활성화하고, LAN 인터페이스에 현재 컴퓨터의 `/32`(DSM 로그에 기록된 주소) 및 IPv4 `allowed_networks` 허용 규칙을 추가하며, `global`이 아닌 모든 인터페이스 정책을 `drop`으로 설정하고, 모든 소스 허용 규칙을 제거 (`--only firewall`) |
 | `quickconnect` | QuickConnect 또는 QuickConnect 자동 라우터 포트 포워딩이 활성화된 경우 `FAIL` | QuickConnect 및 해당 UPnP 라우터 포트 포워딩을 비활성화 (`--only quickconnect`) |

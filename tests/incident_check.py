@@ -53,8 +53,31 @@ pat.handle = lambda a, m, p: (ok({"firmware_ver": "DSM 7.4.1-90080 Update 1", "t
                               if (a, m) == ("SYNO.Core.System", "info") else
                               ok({"items": [], "total": 0}) if (a, m) == ("SYNO.Core.SyslogClient.Log", "list")
                               else orig(a, m, p))
-got = status(incident.audit(FakeSession(pat), args())[1]["items"])
+audited = incident.audit(FakeSession(pat), args())[1]["items"]
+got = status(audited)
 assert got["dsm_version"] == "PASS" and got["firewall"] == "PASS" and got["smb_min_protocol"] == "PASS", got
+dsm_ok = next(i for i in audited if i["id"] == "dsm_version")
+assert "SA-26:13 patched" in dsm_ok["detail"] and "SA-26:19 patched" in dsm_ok["detail"], dsm_ok
+# SA-26:13 patched is not enough: Update 4 is still missing SA-26:19, so the audit FAILs
+# and the upgrade plan is not refused as already patched. Planning stays read-only.
+gap = FakeNas()
+orig_gap = gap.handle
+gap.handle = lambda a, m, p: (ok({"firmware_ver": "DSM 7.3.2-86009 Update 4", "time": "2026-10-30 12:00:00"})
+                              if (a, m) == ("SYNO.Core.System", "info") else orig_gap(a, m, p))
+gap_items = incident.audit(FakeSession(gap), args())[1]["items"]
+dsm_gap = next(i for i in gap_items if i["id"] == "dsm_version")
+assert dsm_gap["status"] == "FAIL" and "SA-26:19 vulnerable" in dsm_gap["detail"], dsm_gap
+assert "SA-26:13 patched" in dsm_gap["detail"] and "DSM patch" not in dsm_gap["detail"]
+s_gap = FakeSession(gap)
+f_gap = incident.gather(s_gap, args())
+up_gap = next(c for c in incident.plan(s_gap, f_gap, args(action="fix", upgrade=True)) if c["fix"] == "upgrade")
+assert not up_gap.get("refused") and "SA-26:19" in up_gap["before"], up_gap
+assert all(is_read_method(m) for _, m in gap.sent)
+s_pat = FakeSession(pat)
+f_pat = incident.gather(s_pat, args())
+up_ok = next(c for c in incident.plan(s_pat, f_pat, args(action="fix", upgrade=True)) if c["fix"] == "upgrade")
+assert up_ok.get("refused") and "already patched" in up_ok["refused"], up_ok
+assert all(is_read_method(m) for _, m in pat.sent)
 assert got["snapshot_worm:photos"] == "PASS" and got["admin_account"] == "PASS", got
 # --probe on the local backend is a SKIP with the reason
 it = next(i for i in incident.audit(FakeSession(FakeNas(), "local"), args(probe=True))[1]["items"] if i["id"] == "public_ports")

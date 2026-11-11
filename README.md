@@ -10,7 +10,7 @@ Canonical repository, releases and issues: https://gitlab.com/aa22396584/synolog
 
 ![nas incident: audit, plan, fix](docs/assets/demo.gif)
 
-`nas` is a zero-dependency Python CLI (standard library only, Python 3.8+, so it also runs on DSM itself) and stdio MCP server for the Synology DSM 7 Web API: status, health, logs, packages, volumes, Tailscale, DSM upgrades, scheduled health alerts pushed to a webhook, and an incident audit and remediation tool built during the October 2026 C3RB3R / `.L0CK3D` campaign against internet-exposed Synology NAS boxes (Synology-SA-24:20, SA-26:13, SA-26:14).
+`nas` is a zero-dependency Python CLI (standard library only, Python 3.8+, so it also runs on DSM itself) and stdio MCP server for the Synology DSM 7 Web API: status, health, logs, packages, volumes, Tailscale, DSM upgrades, scheduled health alerts pushed to a webhook, and an incident audit and remediation tool built during the October 2026 C3RB3R / `.L0CK3D` campaign against internet-exposed Synology NAS boxes (Synology-SA-24:20, SA-26:13, SA-26:19, SA-26:14).
 
 Not affiliated with Synology Inc. "Synology", "DSM" and "QuickConnect" are trademarks of Synology Inc.
 
@@ -51,7 +51,7 @@ Use https://github.com/akari-sora/synology-nas-cli to audit and fix my Synology 
 
 1. **Install**: Clones the repository (or installs the package) and verifies `./bin/nas --version`.
 2. **`nas setup`**: Runs `nas setup --json --no-input ...` to write `~/.config/synology-nas-cli/config.json` (mode `0600`), signs in once to verify credentials, and pins DSM's TLS certificate SHA-256 fingerprint on first use.
-3. **`nas doctor`**: Runs `nas doctor --json` to verify configuration, credentials, origin reachability, TLS pin, login, DSM version against SA-26:13, 2-step verification status, administrator capabilities, and clock skew.
+3. **`nas doctor`**: Runs `nas doctor --json` to verify configuration, credentials, origin reachability, TLS pin, login, DSM version against SA-26:13 and SA-26:19 (the check fails when either is unpatched), 2-step verification status, administrator capabilities, and clock skew.
 4. **`nas incident`**: Runs `nas incident --json` (and optionally `--probe --scan`) for a read-only audit of DSM version, vulnerable packages, firewall, QuickConnect, UPnP router rules, public ports, external and failed sign-ins, AutoBlock, SMB1, built-in `admin`, snapshot schedules, the unsupported-model WORM lock trap, ransom notes, and CVE-2024-10441 exploit attempts.
 5. **Plan**: Runs `nas incident fix --dry-run --json --ransom-scan` and shows every planned change (`before -> after`), the exact DSM Web API calls, and the corresponding DSM web UI path.
 6. **`nas incident fix --yes`**: Applies the approved plan in order (`snapshot_worm` → `snapshots` → `packages` → `smb_min_protocol` → `quickconnect` → `router_port_forwarding` → `autoblock` → `admin_account` → `firewall`, plus optional `--rotate-password` and `--upgrade`), reads every setting back to verify, and re-runs the audit.
@@ -86,7 +86,7 @@ flowchart LR
 
 | Item | What `nas incident` reports | What `nas incident fix` changes |
 |---|---|---|
-| `dsm_version` | `FAIL` if the DSM build is older than the SA-26:13 fixed build for its branch, or on a branch with no SA-26:13 fix (DSM 7.1 and older); `PASS` if patched | With `--upgrade`: downloads the newest official `.pat` for the model, runs PreCheck, installs, and reboots |
+| `dsm_version` | `FAIL` if SA-26:13 or SA-26:19 is unpatched on this branch, or the branch has no fix (DSM 7.1 and older); `PASS` only when both are patched. `nas status` prints each advisory and an overall DSM-patch verdict | With `--upgrade`: downloads the newest official `.pat` for the model, runs PreCheck, installs, and reboots |
 | `sa_26_14_packages` | Checks installed packages against Synology-SA-26:14 (Calendar, MailStation, PHP 7.3–8.4): `FAIL` if a vulnerable version is running, `WARN` if installed but stopped | Stops running vulnerable packages (`--only packages`) |
 | `firewall` | `FAIL` when the firewall is off and the NAS holds a public IP itself (e.g. dials PPPoE), `WARN` when off behind NAT, or `FAIL`/`WARN` when interfaces accept unmatched traffic or rules allow any source (`source_ip: all`) | Enables the firewall, adds allow rules for this computer's `/32` (as DSM logged it) plus IPv4 `allowed_networks` on LAN interfaces, sets every non-`global` interface policy to `drop`, and removes allow-any-source rules (`--only firewall`) |
 | `quickconnect` | `FAIL` when QuickConnect or QuickConnect automatic router port forwarding is enabled | Turns off QuickConnect and its UPnP router port forwarding (`--only quickconnect`) |
@@ -379,7 +379,7 @@ Receivers: any HTTPS endpoint that takes a JSON POST with one header (generic JS
 nas setup --origin URL --user USER --password-source SOURCE   # write the config, sign in once, pin the certificate
 nas doctor        # config, credentials, origin, TLS, login, DSM version, 2FA, capabilities, clock
 nas whoami        # backend, origin, credential source, session, account, admin flag, DSM version
-nas status        # model, DSM version, uptime, SA-26:13 verdict
+nas status        # model, DSM version, uptime, SA-26:13, SA-26:19, overall DSM-patch verdict
 nas net           # interfaces, PPPoE (public address), firewall, gateway
 nas services      # SSH / FTP / SMB / AFP / NFS / rsync / QuickConnect / AutoBlock / DSM ports
 nas inventory     # shares, packages (SA-26:14 flags), containers, users (2FA), scheduled tasks

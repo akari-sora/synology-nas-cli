@@ -50,6 +50,17 @@ def _onoff(v) -> str:
     return "ON" if v else "off"
 
 
+def _advisory_line(v: dict, title: str = "") -> str:
+    """One verdict. title overrides the advisory name (the overall DSM-patch line)."""
+    name = title or v.get("advisory") or "DSM"
+    text = f"{name:<13}{v['status']}"
+    if v["status"] != "patched" and v.get("note"):
+        text += f" — {v['note']}"
+    elif v.get("fixed_in") and v["status"] == "patched":
+        text += f" [fixed in {v['fixed_in']}]"
+    return text
+
+
 def _uptime(s: str) -> str:
     try:
         h, m, sec = (int(x) for x in s.split(":"))
@@ -63,8 +74,13 @@ def _uptime(s: str) -> str:
 def status(s, args):
     d = need("SYNO.Core.System", s.call("SYNO.Core.System", "info", version=1))
     fw = d.get("firmware_ver", "")
-    verdict = advisories.dsm_verdict(fw)
+    report = advisories.dsm_verdict(fw)
     latest = config.get()["latest_dsm"] or None
+    patch = {"status": report["status"]}
+    if report.get("fixed_in"):
+        patch["fixed_in"] = report["fixed_in"]
+    if report.get("note"):
+        patch["note"] = report["note"]
     data = {
         "model": d.get("model"),
         "firmware_ver": fw,
@@ -73,15 +89,18 @@ def status(s, args):
         "nas_time": d.get("time"),
         "sys_temp_c": d.get("sys_temp"),
         "ram_mb": d.get("ram_size"),
-        "sa_26_13": verdict,
+        "sa_26_13": report["advisories"]["sa_26_13"],
+        "sa_26_19": report["advisories"]["sa_26_19"],
+        "dsm_patch": patch,
         "latest_for_model": latest,
     }
     lines = [
         f"Model        {data['model']}  RAM {data['ram_mb']} MB  temp {data['sys_temp_c']}°C",
         f"DSM          {fw}  (released {data['firmware_date']})",
         f"Uptime       {data['uptime']}  (NAS clock {data['nas_time']})",
-        f"SA-26:13     {verdict['status']}" + (f" — {verdict['note']}" if verdict.get("note") else "")
-        + (f" [fixed in {verdict['fixed_in']}]" if verdict.get("fixed_in") and verdict["status"] == "patched" else ""),
+        _advisory_line(data["sa_26_13"]),
+        _advisory_line(data["sa_26_19"]),
+        _advisory_line(patch, "DSM patch"),
     ]
     if latest:
         lines.append(f"Latest DSM   {latest} (config latest_dsm)")

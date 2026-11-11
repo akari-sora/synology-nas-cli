@@ -8,8 +8,27 @@
     "firmware_ver",
     "uptime",
     "sa_26_13",
+    "sa_26_19",
+    "dsm_patch",
     "latest_for_model"
   ],
+  "$defs": {
+    "verdict": {
+      "type": "object",
+      "required": ["status"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": ["patched", "vulnerable", "no_fix_for_branch", "unknown"]
+        },
+        "fixed_in": {"type": "string"},
+        "note": {"type": "string"},
+        "advisory": {"type": "string"},
+        "url": {"type": "string"},
+        "cves": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  },
   "properties": {
     "model": {
       "type": [
@@ -55,27 +74,8 @@
         "null"
       ]
     },
-    "sa_26_13": {
-      "type": "object",
-      "required": [
-        "status"
-      ],
-      "properties": {
-        "status": {
-          "enum": [
-            "patched",
-            "vulnerable",
-            "no_fix_for_branch",
-            "unknown"
-          ]
-        },
-        "fixed_in": {
-          "type": "string"
-        },
-        "note": {
-          "type": "string"
-        }
-      }
-    }
+    "sa_26_13": {"$ref": "#/$defs/verdict"},
+    "sa_26_19": {"$ref": "#/$defs/verdict"},
+    "dsm_patch": {"$ref": "#/$defs/verdict"}
   }
 }

@@ -10,7 +10,7 @@
 
 ![nas incident: audit, plan, fix](docs/assets/demo.gif)
 
-`nas` 是零外部相依性的 Python 命令列工具（僅使用標準函式庫，支援 Python 3.8+，因此也能直接在 DSM 本機上執行）與 stdio MCP 伺服器，支援 Synology DSM 7 Web API：系統狀態、健康度、日誌、套件、儲存空間、Tailscale、DSM 升級、定期健康檢查並推播警報至 Webhook，以及在 2026 年 10 月針對暴露於網際網路的 Synology NAS 之 C3RB3R / `.L0CK3D` 勒索軟體攻擊活動（Synology-SA-24:20、SA-26:13、SA-26:14）期間開發的資安事件稽核與修復工具。
+`nas` 是零外部相依性的 Python 命令列工具（僅使用標準函式庫，支援 Python 3.8+，因此也能直接在 DSM 本機上執行）與 stdio MCP 伺服器，支援 Synology DSM 7 Web API：系統狀態、健康度、日誌、套件、儲存空間、Tailscale、DSM 升級、定期健康檢查並推播警報至 Webhook，以及在 2026 年 10 月針對暴露於網際網路的 Synology NAS 之 C3RB3R / `.L0CK3D` 勒索軟體攻擊活動（Synology-SA-24:20、SA-26:13、SA-26:19、SA-26:14）期間開發的資安事件稽核與修復工具。
 
 本專案與 Synology Inc. 無關（Not affiliated with Synology Inc.）。"Synology"、"DSM" 與 "QuickConnect" 為 Synology Inc. 的商標。
 
@@ -28,7 +28,7 @@
 
 1. **安裝**：複製此儲存庫（或安裝套件）並驗證 `./bin/nas --version`。
 2. **`nas setup`**：執行 `nas setup --json --no-input ...` 寫入 `~/.config/synology-nas-cli/config.json`（權限 `0600`），登入一次以驗證憑證，並在首次使用時釘選（pin）DSM 的 TLS 憑證 SHA-256 指紋。
-3. **`nas doctor`**：執行 `nas doctor --json` 驗證設定檔、憑證、連線目標可達性、TLS 指紋釘選、登入、DSM 版本（比對 SA-26:13）、兩步驟驗證狀態、管理員權限與系統時鐘偏差。
+3. **`nas doctor`**：執行 `nas doctor --json` 驗證設定檔、憑證、連線目標可達性、TLS 指紋釘選、登入、DSM 版本（比對 SA-26:13 與 SA-26:19；任一未修補即失敗）、兩步驟驗證狀態、管理員權限與系統時鐘偏差。
 4. **`nas incident`**：執行 `nas incident --json`（可選加 `--probe --scan`）對 DSM 版本、有弱點的套件、防火牆、QuickConnect、UPnP 路由器規則、公網連接埠、外部與失敗登入紀錄、AutoBlock、SMB1、內建 `admin` 帳號、快照排程、不支援機型的 WORM 鎖定陷阱、勒索訊息檔，以及 CVE-2024-10441 攻擊嘗試進行唯讀稽核。
 5. **產生修復計畫**：執行 `nas incident fix --dry-run --json --ransom-scan`，顯示每一項預計變更（`before -> after`）、實際會發送的 DSM Web API 呼叫，以及對應的 DSM 網頁介面路徑。
 6. **`nas incident fix --yes`**：依序套用核准的計畫（`snapshot_worm` → `snapshots` → `packages` → `smb_min_protocol` → `quickconnect` → `router_port_forwarding` → `autoblock` → `admin_account` → `firewall`，以及選用的 `--rotate-password` 與 `--upgrade`），逐項讀回設定以驗證結果，並重新執行一次稽核。
@@ -63,7 +63,7 @@ flowchart LR
 
 | 項目 | `nas incident` 回報內容 | `nas incident fix` 變更內容 |
 |---|---|---|
-| `dsm_version` | 若 DSM 版本組建低於該分支的 SA-26:13 修補版本，或位於沒有 SA-26:13 修補程式的分支（DSM 7.1 及更舊版本）則為 `FAIL`；已修補則為 `PASS` | 搭配 `--upgrade`：下載該機型最新的官方 `.pat`、執行 PreCheck、安裝並重新開機 |
+| `dsm_version` | 若 SA-26:13 或 SA-26:19 在該分支尚未修補，或該分支沒有修補程式（DSM 7.1 及更舊版本），則為 `FAIL`；兩者都已修補才為 `PASS`。`nas status` 會分別顯示各公告與整體 DSM 修補結論 | 搭配 `--upgrade`：下載該機型最新的官方 `.pat`、執行 PreCheck、安裝並重新開機 |
 | `sa_26_14_packages` | 比對已安裝套件與 Synology-SA-26:14（Calendar、MailStation、PHP 7.3–8.4）：若有弱點的版本正在執行則為 `FAIL`，已安裝但已停止則為 `WARN` | 停止正在執行的有弱點套件（`--only packages`） |
 | `firewall` | 當防火牆關閉且 NAS 本身持有公網 IP（例如自行撥接 PPPoE）時為 `FAIL`；在 NAT 後方關閉時為 `WARN`；或當網路介面預設允許未比對流量、或規則允許任意來源（`source_ip: all`）時為 `FAIL`／`WARN` | 啟用防火牆，在區網介面上新增本機 `/32`（依 DSM 連線紀錄所示）以及 IPv4 `allowed_networks` 的允許規則，將所有非 `global` 介面的預設政策設為 `drop`，並移除允許任意來源的規則（`--only firewall`） |
 | `quickconnect` | 當 QuickConnect 或 QuickConnect 自動路由器連接埠轉送啟用時為 `FAIL` | 關閉 QuickConnect 及其 UPnP 路由器連接埠轉送（`--only quickconnect`） |

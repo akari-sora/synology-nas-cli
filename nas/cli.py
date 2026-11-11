@@ -18,7 +18,7 @@ COMMANDS = {
     "setup": (None, "write the config and sign in once; reports missing information as JSON (exit 3)"),
     "doctor": (None, "check config, credentials, origin, TLS, login, DSM version, 2FA, capabilities, clock"),
     "whoami": (commands.whoami, "log in and show backend, origin, credential source, account, admin flag, DSM version"),
-    "status": (commands.status, "model, DSM version, uptime, SA-26:13 verdict"),
+    "status": (commands.status, "model, DSM version, uptime, SA-26:13, SA-26:19 and overall DSM-patch verdict"),
     "net": (commands.net, "interfaces, PPPoE, firewall"),
     "services": (commands.services, "SSH/FTP/SMB/AFP/NFS/rsync/QuickConnect/AutoBlock"),
     "inventory": (commands.inventory, "shares, packages (SA-26:14), containers, users, scheduled tasks"),

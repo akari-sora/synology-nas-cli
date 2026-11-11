@@ -1,12 +1,13 @@
-"""Known fixed builds, checked against what the NAS reports."""
+"""Offline, advisory-scoped fixed-build checks; never a claim of overall NAS safety."""
 
 from __future__ import annotations
 
 import re
 
-# Synology-SA-26:13 (2026-09-18): CVE-2026-13639 / CVE-2026-13684, used by
-# the C3RB3R (.L0CK3D) campaign. Branch prefix -> (build, update) that fixes it.
-# DSM 7.1.x and older are not listed: that branch gets no fix.
+# Synology-SA-26:13 (2026-09-18). (branch, build, update).
+# Patched means (build, update) on that branch, not a higher micro version:
+# 7.3.2-86009 Update 3 is still short of Update 4, and 7.4.1-1 is not 7.4-90075.
+# DSM 7.1 and older are not listed.
 SA_26_13 = {
     "url": "https://www.synology.com/en-global/security/advisory/Synology_SA_26_13",
     "fixed": [
@@ -17,8 +18,24 @@ SA_26_13 = {
     ],
 }
 
-# Synology-SA-26:14 "PHP2Shell" (2026-10-22, rev 2026-10-26): package -> fixed version,
-# None means no fix (end of life, uninstall).
+# Synology-SA-26:19 revision 1, published 2026-11-10; checked 2026-11-11.
+# https://www.synology.com/en-global/security/advisory/Synology_SA_26_19
+# (branch, build, update, release). release is the product version the advisory
+# names ("or above"); None when the branch prefix is already that version
+# (7.2.1, 7.2.2). An older micro on the same branch stays vulnerable.
+SA_26_19 = {
+    "url": "https://www.synology.com/en-global/security/advisory/Synology_SA_26_19",
+    "published": "2026-11-10",
+    "checked": "2026-11-11",
+    "cves": ["CVE-2026-76954", "CVE-2026-85101"],
+    "fixed": [
+        ("7.4", 90080, 1, "7.4.1"),
+        ("7.3", 86009, 5, "7.3.2"),
+        ("7.2.2", 72806, 10, None),
+        ("7.2.1", 69057, 13, None),
+    ],
+}
+
 SA_26_14 = {
     "url": "https://www.synology.com/en-global/security/advisory/Synology_SA_26_14",
     "fixed": {
@@ -34,11 +51,36 @@ SA_26_14 = {
     },
 }
 
-_DSM_RE = re.compile(r"DSM\s+(\d+)\.(\d+)(?:\.(\d+))?-(\d+)(?:\s+Update\s+(\d+))?")
+DSM_ADVISORIES = {"sa_26_13": SA_26_13, "sa_26_19": SA_26_19}
+_DSM_RE = re.compile(
+    r"(?:DSM\s+)?(\d+)\.(\d+)(?:\.(\d+))?-(\d+)(?:(?:\s+Update\s+|-)(\d+))?"
+)
+_STATUS_ORDER = ("vulnerable", "no_fix_for_branch", "unknown", "patched")
+
+
+def _label(advisory: str) -> str:
+    return advisory.upper().replace("_", "-", 1).replace("_", ":", 1)
+
+
+def _rows(table: dict):
+    """(prefix, build, update, release or None), longer prefixes first."""
+    rows = []
+    for row in table["fixed"]:
+        if len(row) == 3:
+            prefix, build, update = row
+            release = None
+        else:
+            prefix, build, update, release = row
+        rows.append((prefix, build, update, release))
+    rows.sort(key=lambda r: r[0].count("."), reverse=True)
+    return rows
 
 
 def parse_dsm(firmware_ver: str):
-    m = _DSM_RE.search(firmware_ver or "")
+    """Accept DSM's display form and Synology's release form, but not partial input."""
+    if not isinstance(firmware_ver, str):
+        return None
+    m = _DSM_RE.fullmatch(firmware_ver.strip())
     if not m:
         return None
     major, minor, micro, build, update = m.groups()
@@ -50,32 +92,90 @@ def parse_dsm(firmware_ver: str):
     }
 
 
-def dsm_verdict(firmware_ver: str) -> dict:
+def _branch_match(v: dict, prefix: str) -> bool:
+    if prefix.count(".") >= 2:
+        return v["branch3"] == prefix
+    return v["branch2"] == prefix
+
+
+def _meets(v: dict, build: int, update: int, release) -> bool:
+    if release:
+        current = tuple(int(x) for x in v["branch3"].split("."))
+        minimum = tuple(int(x) for x in release.split("."))
+        if current != minimum:
+            return current > minimum
+    return (v["build"], v["update"]) >= (build, update)
+
+
+def dsm_advisory_verdict(firmware_ver: str, advisory: str) -> dict:
+    """One advisory only. A branch that is not listed is never called patched."""
+    table = DSM_ADVISORIES[advisory]
+    label = _label(advisory)
+    meta = {"advisory": label, "url": table["url"]}
+    if table.get("cves"):
+        meta["cves"] = list(table["cves"])
     v = parse_dsm(firmware_ver)
     if not v:
-        return {"status": "unknown", "note": f"cannot parse {firmware_ver!r}"}
-    match = None
-    for prefix, build, update in SA_26_13["fixed"]:
-        if prefix.count(".") == 2 and prefix == v["branch3"]:
-            match = (prefix, build, update)
-            break
-    if not match:
-        for prefix, build, update in SA_26_13["fixed"]:
-            if prefix.count(".") == 1 and prefix == v["branch2"]:
-                match = (prefix, build, update)
+        return dict(meta, status="unknown",
+                    note="cannot parse DSM version; verify it in Control Panel > Update & Restore")
+    match = next((row for row in _rows(table) if _branch_match(v, row[0])), None)
+    if match is None:
+        branch = tuple(int(x) for x in v["branch3"].split("."))
+        status = "no_fix_for_branch" if branch < (7, 2, 1) else "unknown"
+        if status == "no_fix_for_branch":
+            note = (f"DSM {v['branch3']} is not covered by {label}; no patch is listed for it. "
+                    "Upgrade to a fixed branch (`nas upgrade --dry-run` shows the newest build for this model).")
+        else:
+            note = (f"DSM {v['branch3']} has no fixed release listed in {label}; "
+                    "check the official advisory and this model's supported upgrade path")
+        return dict(meta, status=status, note=note)
+    prefix, build, update, release = match
+    shown = release or prefix
+    fixed_in = f"{shown}-{build}" + (f"-{update}" if update else "")
+    patched = _meets(v, build, update, release)
+    out = dict(meta, status="patched" if patched else "vulnerable", fixed_in=fixed_in)
+    if not patched:
+        out["note"] = (f"{label}: update to {fixed_in} or later "
+                       "(`nas upgrade --dry-run` shows the newest build for this model)")
+    return out
+
+
+def dsm_verdict(firmware_ver: str) -> dict:
+    """Every tracked DSM advisory. status is patched only when each of them is."""
+    results = {key: dsm_advisory_verdict(firmware_ver, key) for key in DSM_ADVISORIES}
+    status = next(s for s in _STATUS_ORDER if any(v["status"] == s for v in results.values()))
+    out = {"status": status, "advisories": results}
+    if status != "patched":
+        for key in ("sa_26_19", "sa_26_13"):
+            if results[key]["status"] != "patched" and results[key].get("fixed_in"):
+                out["fixed_in"] = results[key]["fixed_in"]
                 break
-    if not match:
-        return {
-            "status": "no_fix_for_branch",
-            "note": f"DSM {v['branch3']} is not covered by SA-26:13; no patch will come for it. "
-                    "Upgrade to a fixed branch (`nas upgrade --dry-run` shows the newest build for this model).",
-        }
-    prefix, build, update = match
-    fixed_in = f"{prefix}-{build}" + (f"-{update}" if update else "")
-    if (v["build"], v["update"]) >= (build, update):
-        return {"status": "patched", "fixed_in": fixed_in}
-    return {"status": "vulnerable", "fixed_in": fixed_in,
-            "note": f"update to {fixed_in} or later (`nas upgrade --dry-run` shows the newest build for this model)"}
+        notes = []
+        for v in results.values():
+            if v["status"] != "patched" and v.get("note") and v["note"] not in notes:
+                notes.append(v["note"])
+        if notes:
+            out["note"] = "; ".join(notes)
+    return out
+
+
+def dsm_detail(firmware_ver: str, report: dict) -> str:
+    """Human text for one DSM build: each advisory by name, then the note when not fully patched."""
+    bits = "; ".join(advisory_phrase(report["advisories"][k]) for k in ("sa_26_13", "sa_26_19"))
+    detail = f"{firmware_ver}: {bits}"
+    if report.get("status") != "patched" and report.get("note"):
+        detail += ". " + report["note"]
+    return detail
+
+
+def advisory_phrase(v: dict) -> str:
+    """One advisory, named. Never describes a different advisory as patched."""
+    label = v.get("advisory") or "DSM"
+    if v.get("status") == "patched" and v.get("fixed_in"):
+        return f"{label} patched (fixed in {v['fixed_in']})"
+    if v.get("status") == "vulnerable" and v.get("fixed_in"):
+        return f"{label} vulnerable (fixed in {v['fixed_in']})"
+    return f"{label} {v.get('status')}"
 
 
 def _vtuple(s: str) -> tuple:

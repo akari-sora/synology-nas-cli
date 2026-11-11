@@ -154,8 +154,11 @@ def alert(s, args):
     fwver = sysinfo.get("firmware_ver", "")
     verdict = advisories.dsm_verdict(fwver)
     if verdict.get("status") != "patched":
-        add("critical", "dsm_unpatched", "condition",
-            f"{fwver}: SA-26:13 {verdict.get('status')}" + (f" ({verdict['note']})" if verdict.get("note") else ""))
+        bits = ", ".join(advisories.advisory_phrase(verdict["advisories"][k]) for k in ("sa_26_13", "sa_26_19"))
+        msg = f"{fwver}: {bits}"
+        if verdict.get("note"):
+            msg += f" ({verdict['note']})"
+        add("critical", "dsm_unpatched", "condition", msg)
     latest = config.get()["latest_dsm"]
     if latest and _version_tuple(fwver) < _version_tuple("DSM " + latest):
         add("warning", "dsm_behind", "condition", f"{fwver} is older than {latest}")

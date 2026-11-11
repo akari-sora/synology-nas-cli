@@ -47,7 +47,7 @@ Sessions: by default each command signs in and out. `nas login` caches the sessi
 | Write config, sign in once, pin TLS certificate | `nas setup --origin URL --user USER --password-source SOURCE` |
 | Verify config, credentials, TLS, login, DSM build, 2FA, capabilities, clock | `nas doctor` |
 | Backend, origin, credential source, session, account, admin flag, DSM build | `nas whoami` |
-| Model, DSM build, SA-26:13 verdict | `nas status` |
+| Model, DSM build, SA-26:13, SA-26:19, and the overall DSM-patch verdict | `nas status` |
 | Disks, SMART, temperatures, pools, volumes, UPS, CPU, memory | `nas health` |
 | Interfaces, PPPoE public address, firewall | `nas net` |
 | SSH/FTP/SMB/AFP/NFS/rsync/QuickConnect/AutoBlock | `nas services` |
