@@ -248,9 +248,10 @@ def evaluate(f, args) -> list:
         elif v["status"] == "unknown":
             add(item("dsm_version", WARN, detail, "check Control Panel > Update & Restore"))
         else:
-            if advisories.needs_control_panel_update(fw_ver):
+            if advisories.update_gap_only(fw_ver):
                 add(item("dsm_version", FAIL, detail,
-                         "install the pending Update in Control Panel > Update & Restore"))
+                         "run `nas upgrade --dry-run` for the verified Update pack, then "
+                         "`nas upgrade --install-update --yes` (or Control Panel > Update & Restore)"))
             else:
                 add(item("dsm_version", FAIL, detail,
                          "nas upgrade --dry-run, then `nas incident fix --upgrade` (the NAS reboots)", "upgrade"))
@@ -1213,16 +1214,21 @@ def plan_upgrade(s, f, args) -> dict:
     if it and it["status"] == PASS and not getattr(args, "force", False):
         return _change("upgrade", "DSM", it["detail"], "-", [], refused="already patched (override: --force)")
     sysinfo = (f.get("sys") or (None, None))[0] or {}
-    if advisories.needs_control_panel_update(sysinfo.get("firmware_ver", "")) and not getattr(args, "force", False):
+    if advisories.update_gap_only(sysinfo.get("firmware_ver", "")):
+        # `incident fix --upgrade` does not install Update packs yet (the pack
+        # flow has no live test on a real box): point at the explicit command instead.
         return _change("upgrade", "DSM", it["detail"] if it else "-", "-", [],
-                       refused="the remaining fix is an Update on this build: install it in Control Panel > "
-                               "Update & Restore (`nas upgrade` only finds full builds; override: --force)")
+                       refused="the remaining fix is an Update on this build: run "
+                               "`nas upgrade --dry-run` for the verified pack, then "
+                               "`nas upgrade --install-update --yes` "
+                               "(or install it in Control Panel > Update & Restore)")
     if s.backend_name != "password":
         return _change("upgrade", "DSM", "-", "-", [], refused="--upgrade needs --backend password (uploads the .pat)")
     from . import upgrade as up
 
     def apply(s_):
         ns = types.SimpleNamespace(pat=None, dry_run=False, yes=True, force=bool(getattr(args, "force", False)),
+                                   install_update=False,
                                    wait_only=False,
                                    download_dir=config.path(config.get()["upgrade"]["cache_dir"]),
                                    lang=config.get()["upgrade"]["lang"], timeout=3600,
@@ -1231,10 +1237,11 @@ def plan_upgrade(s, f, args) -> dict:
         for line in lines:
             print("  " + line, file=sys.stderr)
         if data.get("action") != "installed":
+            if data.get("action") == "downloaded":
+                raise NasError("Update pack downloaded and verified but not installed: `incident fix --upgrade` "
+                               "does not install Update packs yet; run `nas upgrade --install-update --yes`")
             if data.get("action") == "none":
-                raise NasError("nothing to install: already on the newest full build; if DSM offers an Update "
-                               "for it, install that in Control Panel > Update & Restore "
-                               "(`nas upgrade` only finds full builds)")
+                raise NasError("nothing to install: already on the newest full build")
             raise NasError(f"upgrade did not install ({data.get('action')})")
 
     def verify(s_):

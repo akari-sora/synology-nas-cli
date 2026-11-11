@@ -47,6 +47,9 @@ DEFAULTS = {
     "snapshot_max_age_hours": 26,
     # Newest DSM build you expect for this model, e.g. "7.4.1-90080" (empty = skip the "behind" check).
     "latest_dsm": "",
+    # This box's Update-pack filename stem, e.g. "synology_braswell_716+" (empty = no automatic
+    # Update-pack lookup; on the NAS: `grep ^unique= /etc.defaults/synoinfo.conf`).
+    "dsm_unique": "",
     "credentials": {
         # Which source supplies the password: "auto" walks the chain in README order
         # (op, command, keychain, env, prompt); or force one of those names.
@@ -146,6 +149,7 @@ EXAMPLE = {
     "allowed_networks": [],
     "snapshot_shares": ["photos", "documents"],
     "latest_dsm": "",
+    "dsm_unique": "",
     "credentials": {
         "op_username": "op://VAULT/ITEM/username",
         "op_password": "op://VAULT/ITEM/password",

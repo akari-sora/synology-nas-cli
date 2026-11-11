@@ -165,6 +165,20 @@ def alert(s, args):
     upd, _ = part("SYNO.Core.Upgrade.Server", r_upd)
     if upd and ((upd.get("update") or {}).get("available") or (upd.get("promotion") or {}).get("available")):
         add("info", "dsm_update_available", "condition", "Synology offers a DSM update (Control Panel → Update & Restore)")
+        # The v2 shape carries no link or version; capture the newest schema
+        # (v4) raw while an update is offered, so the next Update teaches us
+        # its fields for automatic discovery. Read-only, best effort.
+        try:
+            raw = s.call("SYNO.Core.Upgrade.Server", "check", version=4)
+        except NasError:
+            raw = None
+        if raw is not None:
+            try:
+                with open(os.path.splitext(args.state)[0] + "-upgrade-check.json", "w",
+                          encoding="utf-8") as f:
+                    json.dump(raw, f, ensure_ascii=False, indent=2)
+            except OSError:
+                pass
 
     # storage
     st, e = part("SYNO.Storage.CGI.Storage", r_st)

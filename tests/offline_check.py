@@ -115,23 +115,34 @@ assert later_micro["advisories"]["sa_26_13"]["status"] == "vulnerable"
 assert later_micro["advisories"]["sa_26_19"]["status"] == "patched"
 # the only fix is on an older product version, so it is not offered as this box's fixed_in
 assert later_micro["status"] == "vulnerable" and "fixed_in" not in later_micro, later_micro
-# an Update on the build already installed is not a .pat download; the note says where it is installed
+# an Update on the build already installed: the note points at the verified pack
 u_gap = advisories.dsm_advisory_verdict("DSM 7.4.1-90080 Update 0", "sa_26_19")
-assert "Update & Restore" in u_gap["note"] and "nas upgrade --dry-run" not in u_gap["note"], u_gap
+assert "Update & Restore" in u_gap["note"] and "nas upgrade --dry-run" in u_gap["note"], u_gap
 for fw in ("DSM 7.3.2-86009 Update 4", "DSM 7.2.2-72806 Update 9", "DSM 7.2.1-69057 Update 12"):
     assert "Update & Restore" in advisories.dsm_advisory_verdict(fw, "sa_26_19")["note"], fw
 # a fix on another branch or a lower micro keeps the "upgrade" hint
 assert "nas upgrade --dry-run" in advisories.dsm_advisory_verdict("DSM 7.4.0-90080 Update 1", "sa_26_19")["note"]
 assert "nas upgrade --dry-run" in advisories.dsm_advisory_verdict("DSM 7.4.0-90080", "sa_26_19")["note"]
 assert "nas upgrade --dry-run" in advisories.dsm_advisory_verdict("DSM 7.3.1-86009 Update 5", "sa_26_19")["note"]
-# only an Update on the installed build makes Control Panel the whole fix
-assert advisories.needs_control_panel_update("DSM 7.4.1-90080 Update 0")
-assert advisories.needs_control_panel_update("DSM 7.3.2-86009 Update 4")
-assert not advisories.needs_control_panel_update("DSM 7.4.1-90080 Update 1")
-assert not advisories.needs_control_panel_update("DSM 7.4.0-90080")
-assert not advisories.needs_control_panel_update("DSM 7.3.1-86009 Update 5")
-assert not advisories.needs_control_panel_update("DSM 7.1.1-42962 Update 9")
-assert not advisories.needs_control_panel_update("garbage")
+# only an Update on the installed build takes the pack route
+assert advisories.update_gap_only("DSM 7.4.1-90080 Update 0")
+assert advisories.update_gap_only("DSM 7.3.2-86009 Update 4")
+assert not advisories.update_gap_only("DSM 7.4.1-90080 Update 1")
+assert not advisories.update_gap_only("DSM 7.4.0-90080")
+assert not advisories.update_gap_only("DSM 7.3.1-86009 Update 5")
+assert not advisories.update_gap_only("DSM 7.1.1-42962 Update 9")
+assert not advisories.update_gap_only("garbage")
+# the Update pack route: needed_update is the highest Update closing every open advisory
+assert advisories.needed_update("DSM 7.4.1-90080 Update 0") == 1
+assert advisories.needed_update("DSM 7.3.2-86009 Update 4") == 5
+assert advisories.needed_update("DSM 7.3.2-86009 Update 3") == 5
+assert advisories.needed_update("DSM 7.2.2-72806 Update 9") == 10
+assert advisories.needed_update("DSM 7.2.1-69057 Update 12") == 13
+assert advisories.needed_update("DSM 7.4.1-90080 Update 1") is None
+assert advisories.needed_update("DSM 7.4.0-90080") is None
+assert advisories.needed_update("DSM 7.3.1-86009 Update 5") is None
+assert advisories.needed_update("DSM 7.1.1-42962 Update 9") is None
+assert advisories.needed_update("garbage") is None
 # two branch notes are joined as sentences, not with a stray ".;"
 joined = advisories.dsm_verdict("DSM 7.1.1-42962 Update 9")["note"]
 assert ".;" not in joined and joined.count("is not covered by SA-26:") == 2, joined

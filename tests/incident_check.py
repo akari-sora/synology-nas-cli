@@ -71,11 +71,12 @@ assert "SA-26:13 patched" in dsm_gap["detail"] and "DSM patch" not in dsm_gap["d
 s_gap = FakeSession(gap)
 f_gap = incident.gather(s_gap, args())
 up_gap = next(c for c in incident.plan(s_gap, f_gap, args(action="fix", upgrade=True)) if c["fix"] == "upgrade")
-# the remaining fix is an Update on the installed build: Control Panel installs it, `nas upgrade` cannot
-assert "Control Panel > Update & Restore" in up_gap.get("refused", ""), up_gap
+# the remaining fix is an Update on the installed build: incident fix does not
+# install Update packs yet, so the plan stays refused with the explicit command
+assert "nas upgrade --install-update --yes" in up_gap.get("refused", ""), up_gap
 assert "SA-26:19" in up_gap["before"], up_gap
 hint_gap = next(i for i in gap_items if i["id"] == "dsm_version")["hint"]
-assert "Control Panel > Update & Restore" in hint_gap and "nas upgrade --dry-run" not in hint_gap, hint_gap
+assert "nas upgrade --install-update --yes" in hint_gap, hint_gap
 assert all(is_read_method(m) for _, m in gap.sent)
 s_pat = FakeSession(pat)
 f_pat = incident.gather(s_pat, args())

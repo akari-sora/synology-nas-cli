@@ -161,17 +161,19 @@ def dsm_advisory_verdict(firmware_ver: str, advisory: str) -> dict:
             # An Update on the build already installed. DSM installs it; `nas upgrade`
             # only looks up full builds, so do not send the user there.
             out["note"] = (f"{label}: this build needs Update {update}; install it in "
-                           "Control Panel > Update & Restore (`nas upgrade` only finds full builds)")
+                           "Control Panel > Update & Restore "
+                           "(`nas upgrade --dry-run` shows the verified pack and command)")
         else:
             out["note"] = (f"{label}: update to {fixed_in} or later "
                            "(`nas upgrade --dry-run` shows the newest build for this model)")
     return out
 
 
-def needs_control_panel_update(firmware_ver: str) -> bool:
+def update_gap_only(firmware_ver: str) -> bool:
     """True when every open advisory is fixed by an Update on the build already installed.
 
-    Then Control Panel > Update & Restore is the whole fix; `nas upgrade` cannot help.
+    Then a full-build upgrade is the wrong tool: either the Update pack route
+    (`nas upgrade --install-update`) or Control Panel > Update & Restore.
     False as soon as one open advisory needs a different build, branch or release.
     """
     v = parse_dsm(firmware_ver)
@@ -186,6 +188,27 @@ def needs_control_panel_update(firmware_ver: str) -> bool:
             return False
         open_rows.append(row)
     return bool(open_rows)
+
+
+def needed_update(firmware_ver: str):
+    """Highest Update number that would close every open advisory on this build.
+
+    None unless update_gap_only(): a release-gated row (e.g. 7.4.0 for a fix in
+    7.4.1) or a different build needs a full upgrade, not an Update pack.
+    """
+    v = parse_dsm(firmware_ver)
+    if not v:
+        return None
+    need = None
+    for key, table in DSM_ADVISORIES.items():
+        if dsm_advisory_verdict(firmware_ver, key)["status"] == "patched":
+            continue
+        row = _match_row(v, table)
+        if row is None or not _update_gap(v, row):
+            return None
+        _prefix, _build, update, _release = row
+        need = update if need is None else max(need, update)
+    return need
 
 
 def dsm_verdict(firmware_ver: str) -> dict:
