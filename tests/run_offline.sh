@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Every offline test (no NAS, no network beyond 127.0.0.1), with the current python3 and,
+# Every offline test (no NAS, no network beyond 127.0.0.1; stdin is /dev/null so nothing prompts), with the current python3 and,
 # when `uv python find 3.8` finds one, with Python 3.8 too (DSM 7 ships Python 3.8).
 set -u
 cd "$(dirname "$0")/.."
-tests="offline_check config_check credentials_check incident_check push_check tls_check mcp_check schema_check ioc_check onboard_check contain_check rescue_check upgrade_check"
+tests="offline_check config_check credentials_check incident_check push_check tls_check mcp_check schema_check ioc_check onboard_check contain_check rescue_check upgrade_check update_pack_e2e_check"
 pys=(python3)
 if command -v uv >/dev/null 2>&1 && py38=$(uv python find 3.8 2>/dev/null) && [ -n "$py38" ]; then
   pys+=("$py38")
@@ -13,7 +13,7 @@ trap 'rm -rf "$scratch"' EXIT
 fail=0
 for py in "${pys[@]}"; do
   for t in $tests; do
-    if out=$(cd tests && "$py" -E -s -B "$t.py" 2>&1); then
+    if out=$(cd tests && "$py" -E -s -B "$t.py" 2>&1 </dev/null); then
       echo "$out" | tail -1
     else
       echo "FAIL $t ($py):"; echo "$out" | tail -15; fail=1

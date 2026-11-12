@@ -47,6 +47,8 @@
 ```bash
 tests/run_offline.sh     # every offline check, with python3 and Python 3.8 (`uv python find 3.8`)
 tests/smoke_live.sh      # read-only commands against the NAS in your config (optional)
+NAS_E2E_LIVE=1 python3 tests/update_pack_e2e_check.py   # Update-pack flow with Synology's real API/CDN and packs into a fake DSM (optional, no NAS)
+NAS_E2E_LIVE=1 python3 tests/update_pack_e2e_check.py   # Update-pack flow with Synology's real API/CDN and packs into a fake DSM (optional, no NAS)
 ```
 
 ## Technical facts worth knowing before touching DSM

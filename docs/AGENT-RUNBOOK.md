@@ -8,7 +8,7 @@ The sequence an agent follows from a fresh machine to an audited, hardened and m
 git clone https://gitlab.com/aa22396584/synology-nas-cli.git synology-nas-cli && cd synology-nas-cli
 ./bin/nas --version                     # exit 0; needs Python 3.8+ (stdlib only)
 # or, as a package with a `nas` command:
-pip install -e .                        # or: pip install https://gitlab.com/aa22396584/synology-nas-cli/-/archive/v1.0.0/synology-nas-cli-v1.0.0.tar.gz
+pip install -e .                        # or: pip install https://gitlab.com/aa22396584/synology-nas-cli/-/archive/v1.2.0/synology-nas-cli-v1.2.0.tar.gz
 # on Windows:
 py -3 bin\nas --version
 ```

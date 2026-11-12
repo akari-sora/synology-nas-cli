@@ -267,9 +267,11 @@ assert ("SYNO.Core.Upgrade.Patch", "clean") in us.sent
 from nas import cli as _cli
 _sample = "FAIL  firewall  off\n      -> nas incident fix --only firewall\n  FAIL  -> PASS  firewall   (changed)\nSummary: 4 PASS, 1 SKIP"
 _tty = sys.stdout.isatty
+_term = os.environ.get("TERM")
 try:
     sys.stdout.isatty = lambda: True
     os.environ.pop("NO_COLOR", None)
+    os.environ["TERM"] = "xterm-256color"  # TERM=dumb (CI, agent shells) turns colors off
     painted = _cli._paint(_sample)
     assert "\033[1;31mFAIL\033[0m" in painted and "\033[32mPASS\033[0m" in painted and "\033[2mSKIP\033[0m" in painted
     assert "\033[36m      -> nas incident fix --only firewall\033[0m" in painted and "\033[1m(changed)" in painted
@@ -277,6 +279,10 @@ try:
     assert _cli._paint(_sample) == _sample
 finally:
     os.environ.pop("NO_COLOR", None)
+    if _term is None:
+        os.environ.pop("TERM", None)
+    else:
+        os.environ["TERM"] = _term
     sys.stdout.isatty = _tty
 assert _cli._paint(_sample) == _sample or sys.stdout.isatty(), "plain when stdout is not a terminal"
 print(f"offline checks ok (python {sys.version.split()[0]})")
