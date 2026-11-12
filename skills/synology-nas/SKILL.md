@@ -61,7 +61,7 @@ Sessions: by default each command signs in and out. `nas login` caches the sessi
 | Packages | `nas pkg list\|start ID\|stop ID\|install ID [--volume /volume1]\|uninstall ID [--remove-data]\|default-volume [/volumeN]` |
 | Volume atime | `nas volume list`, `nas volume atime volume_1 noatime` |
 | Tailscale package | `nas tailscale status`, `nas tailscale login-url [--force]` |
-| DSM update | `nas upgrade --dry-run`, `nas upgrade` (PreCheck only), `nas upgrade --yes` (installs, reboots), `nas upgrade --wait-only` |
+| DSM update | `nas upgrade --dry-run`, `nas upgrade` (PreCheck only), `nas upgrade --yes` (installs, reboots), `nas upgrade --install-update --yes` (Update pack for the installed build, header-verified; needs `dsm_unique`), `nas upgrade --wait-only` |
 | Session & TLS certificate management | `nas login [--save] [--trust-device]`, `nas logout [--forget]`, `nas trust [--reset ORIGIN]` |
 | Config management | `nas config init [--force]`, `nas config show` |
 | MCP server over stdio | `nas mcp [--auto-confirm]` (`docs/MCP.md`; `incident_fix` applies with `confirm: true`, or without `confirm` on an `--auto-confirm` server) |

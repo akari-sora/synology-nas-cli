@@ -110,9 +110,10 @@ def _match_row(v: dict, table: dict):
 def _update_gap(v: dict, row) -> bool:
     """True when row is fixed by an Update on the build already installed.
 
-    DSM installs that Update itself (Control Panel > Update & Restore); `nas upgrade`
-    looks up full builds only. A release requirement must already be met: an Update
-    on 7.4.0-90080 does not satisfy an advisory fixed in 7.4.1-90080-1.
+    That fix ships as an Update pack, not a full image: `nas upgrade` finds and
+    verifies it (or DSM installs it from Control Panel > Update & Restore). A
+    release requirement must already be met: an Update on 7.4.0-90080 does not
+    satisfy an advisory fixed in 7.4.1-90080-1.
     """
     _prefix, build, update, release = row
     if v["build"] != build or v["update"] >= update:
@@ -158,11 +159,11 @@ def dsm_advisory_verdict(firmware_ver: str, advisory: str) -> dict:
     out = dict(meta, status="patched" if patched else "vulnerable", fixed_in=fixed_in)
     if not patched:
         if _update_gap(v, match):
-            # An Update on the build already installed. DSM installs it; `nas upgrade`
-            # only looks up full builds, so do not send the user there.
-            out["note"] = (f"{label}: this build needs Update {update}; install it in "
-                           "Control Panel > Update & Restore "
-                           "(`nas upgrade --dry-run` shows the verified pack and command)")
+            # An Update on the build already installed: an Update pack, which
+            # `nas upgrade` discovers and verifies; the control panel is the fallback.
+            out["note"] = (f"{label}: this build needs Update {update}: `nas upgrade --dry-run` finds the "
+                           "verified Update pack, `nas upgrade --install-update --yes` installs it "
+                           "(or Control Panel > Update & Restore)")
         else:
             out["note"] = (f"{label}: update to {fixed_in} or later "
                            "(`nas upgrade --dry-run` shows the newest build for this model)")

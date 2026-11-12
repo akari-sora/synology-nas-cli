@@ -122,7 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
             sp.add_argument("--yes", action="store_true", help="install after PreCheck (the NAS reboots)")
             sp.add_argument("--install-update", action="store_true",
                             help="also install a DSM Update pack for the current build (explicit opt-in: "
-                                 "the Update-pack flow has no live test yet; the NAS reboots)")
+                                 "the Update-pack install has not yet run on a real NAS; the NAS reboots)")
             sp.add_argument("--force", action="store_true", help="proceed even if already on the latest build")
             sp.add_argument("--wait-only", action="store_true",
                             help="just wait until DSM is back and dsm_upgrade_all_done is true")

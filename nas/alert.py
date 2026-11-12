@@ -164,7 +164,8 @@ def alert(s, args):
         add("warning", "dsm_behind", "condition", f"{fwver} is older than {latest}")
     upd, _ = part("SYNO.Core.Upgrade.Server", r_upd)
     if upd and ((upd.get("update") or {}).get("available") or (upd.get("promotion") or {}).get("available")):
-        add("info", "dsm_update_available", "condition", "Synology offers a DSM update (Control Panel → Update & Restore)")
+        add("info", "dsm_update_available", "condition",
+            "Synology offers a DSM update (`nas upgrade --dry-run` shows it; or Control Panel → Update & Restore)")
         # The v2 shape carries no link or version; capture the newest schema
         # (v4) raw while an update is offered, so the next Update teaches us
         # its fields for automatic discovery. Read-only, best effort.

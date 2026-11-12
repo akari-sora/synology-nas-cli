@@ -86,7 +86,7 @@ flowchart LR
 
 | Item | What `nas incident` reports | What `nas incident fix` changes |
 |---|---|---|
-| `dsm_version` | `FAIL` if SA-26:13 or SA-26:19 is unpatched on this branch, or the branch has no fix (DSM 7.1 and older); `PASS` only when both are patched. `nas status` prints each advisory and an overall DSM-patch verdict | With `--upgrade`: downloads the newest official `.pat` for the model, runs PreCheck, installs, and reboots |
+| `dsm_version` | `FAIL` if SA-26:13 or SA-26:19 is unpatched on this branch, or the branch has no fix (DSM 7.1 and older); `PASS` only when both are patched. `nas status` prints each advisory and an overall DSM-patch verdict | With `--upgrade`: downloads the newest official `.pat` for the model, runs PreCheck, installs, and reboots. When the only fix is an Update on the installed build, it refuses and points at `nas upgrade --install-update --yes` (the verified Update pack) |
 | `sa_26_14_packages` | Checks installed packages against Synology-SA-26:14 (Calendar, MailStation, PHP 7.3–8.4): `FAIL` if a vulnerable version is running, `WARN` if installed but stopped | Stops running vulnerable packages (`--only packages`) |
 | `firewall` | `FAIL` when the firewall is off and the NAS holds a public IP itself (e.g. dials PPPoE), `WARN` when off behind NAT, or `FAIL`/`WARN` when interfaces accept unmatched traffic or rules allow any source (`source_ip: all`) | Enables the firewall, adds allow rules for this computer's `/32` (as DSM logged it) plus IPv4 `allowed_networks` on LAN interfaces, sets every non-`global` interface policy to `drop`, and removes allow-any-source rules (`--only firewall`) |
 | `quickconnect` | `FAIL` when QuickConnect or QuickConnect automatic router port forwarding is enabled | Turns off QuickConnect and its UPnP router port forwarding (`--only quickconnect`) |
@@ -119,7 +119,7 @@ ln -s "$PWD/bin/nas" ~/bin/nas       # optional: put `nas` on PATH
 ### With `pip` from a GitLab release or local checkout
 
 ```bash
-pip install https://gitlab.com/aa22396584/synology-nas-cli/-/archive/v1.0.0/synology-nas-cli-v1.0.0.tar.gz
+pip install https://gitlab.com/aa22396584/synology-nas-cli/-/archive/v1.2.0/synology-nas-cli-v1.2.0.tar.gz
 # or from a local checkout:
 pip install -e .                     # or: pipx install .
 nas --help
@@ -391,6 +391,8 @@ nas exposure      # TCP probe of LAN and public addresses from this machine
 nas incident [--probe] [--scan] [--deep] [--hours 24] [--failed-threshold 20]
 nas incident fix [--dry-run] [--yes] [--only LIST] [--skip LIST] [--share S] [--ransom-scan] [--upgrade] [--rotate-password]
 nas upgrade --dry-run | nas upgrade | nas upgrade --yes | nas upgrade --wait-only
+nas upgrade --install-update --yes   # Update pack for the installed build: download, verify (MD5, model/build/branch/Update header), install
+nas upgrade --pat FILE [--yes]      # a file you picked; an Update pack is header-checked before upload
 nas pkg list | start ID | stop ID | install ID [--volume /volume1] | uninstall ID [--remove-data] | default-volume [/volumeN]
 nas volume list | volume atime volume_1 noatime
 nas tailscale status | tailscale login-url [--force]
@@ -423,7 +425,7 @@ nas mcp [--auto-confirm]                                      # MCP server on st
 
 ## What changes the NAS
 
-- Commands that change the NAS: `incident fix` (asks, or `--yes`), `incident contain` (`SIGSTOP` with `--yes`; `--stop-sync` stops packages; `--release`), `incident rescue` (asks, or `--yes`: freeze, temporary root tasks, the capture folder), `upgrade` (without `--yes` it still uploads the `.pat` and runs PreCheck, then deletes the upload; `--yes` installs), `pkg start|stop|install|uninstall|default-volume VOL`, `volume atime`, `tailscale login-url`, `alert-deploy`, `login --save` / `logout --forget` (local keychain only), `trust --reset` (local file), and `api` with `--allow-write`. `ransom-scan`, `incident --scan` and `incident fix --ransom-scan` create temporary File Station search tasks on the NAS (stopped and cleaned afterwards). `nas api` sends methods that are not reads with `--allow-write`, `--yes` or `NAS_YES=1`.
+- Commands that change the NAS: `incident fix` (asks, or `--yes`), `incident contain` (`SIGSTOP` with `--yes`; `--stop-sync` stops packages; `--release`), `incident rescue` (asks, or `--yes`: freeze, temporary root tasks, the capture folder), `upgrade` (without `--yes` it still uploads a full `.pat` and runs PreCheck, then deletes the upload; `--yes` installs; an Update pack is only downloaded and verified unless `--install-update --yes`), `pkg start|stop|install|uninstall|default-volume VOL`, `volume atime`, `tailscale login-url`, `alert-deploy`, `login --save` / `logout --forget` (local keychain only), `trust --reset` (local file), and `api` with `--allow-write`. `ransom-scan`, `incident --scan` and `incident fix --ransom-scan` create temporary File Station search tasks on the NAS (stopped and cleaned afterwards). `nas api` sends methods that are not reads with `--allow-write`, `--yes` or `NAS_YES=1`.
 - `--yes`, `NAS_YES=1` and config `assume_yes: true` answer every confirmation of the CLI: `incident fix` applies its plan (with `--upgrade` it installs DSM and the NAS reboots, a PreCheck with notes included; with `--rotate-password` it changes the password); `upgrade` installs after PreCheck and the NAS reboots; `incident contain` freezes the candidates (and with `--stop-sync` stops the packages); `incident rescue` runs its steps; `api` sends write methods as with `--allow-write`. `nas mcp` takes its answer from each call's `confirm` and from `--auto-confirm`, not from these.
 - `incident fix --dry-run` prints every write call it would send. The plan always shows current -> new values.
 - Passwords, SIDs and SynoTokens are never printed. `nas api` prints raw DSM output, which can include serial numbers and account names; the other commands filter those.
@@ -435,6 +437,7 @@ nas mcp [--auto-confirm]                                      # MCP server on st
 ```bash
 tests/run_offline.sh      # all offline tests with python3, and with Python 3.8 when `uv python find 3.8` works
 tests/smoke_live.sh       # optional: read-only commands against your NAS (uses your config)
+NAS_E2E_LIVE=1 python3 tests/update_pack_e2e_check.py   # optional: Update-pack flow with Synology's real download API, CDN and packs, installed into a fake DSM on 127.0.0.1 (no NAS)
 ```
 
 ---

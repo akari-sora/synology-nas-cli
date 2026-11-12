@@ -304,6 +304,51 @@ restore_net()
 assert data["action"] == "none" and "Already on the latest build" in "\n".join(lines), (lines, data)
 assert "--force" not in "\n".join(lines)  # --force would refuse the downgrade, so don't offer it
 
+# newest full build already installed, but Synology lists a newer Update for it
+# (no advisory gap): the pack route, not "nothing to do"
+newer_info = {"system": {"detail": [{"items": [dict(full_info["system"]["detail"][0]["items"][0],
+                                                    latest_nano=2)]}]},
+              "pubVers": full_info["pubVers"]}
+upgrade._download_info = lambda model, major, minor: newer_info
+upgrade._head = lambda url: (200, 5340602, "")
+s = FakeSession(FW1)
+lines, data = upgrade.upgrade(s, up_args(dry_run=True))
+restore_net()
+assert data["action"] == "dry-run" and data["pack"]["update"] == 2 and data["pack"]["needed"] is None, data
+assert "/90080-2/" in data["pack"]["url"], data
+assert s.calls == [("SYNO.Core.System", "info", 1)], s.calls
+
+# same without dsm_unique: reported, not an error (no advisory needs it)
+config.get()["dsm_unique"] = ""
+upgrade._download_info = lambda model, major, minor: newer_info
+s = FakeSession(FW1)
+lines, data = upgrade.upgrade(s, up_args(dry_run=True))
+restore_net()
+config.get()["dsm_unique"] = "synology_braswell_716+"
+assert data["action"] == "none" and "dsm_unique" in "\n".join(lines) and data["pack"]["update"] == 2, (lines, data)
+
+# same, latest_nano equals the installed Update: nothing to do
+same_info = {"system": {"detail": [{"items": [dict(full_info["system"]["detail"][0]["items"][0],
+                                                   latest_nano=1)]}]},
+             "pubVers": full_info["pubVers"]}
+upgrade._download_info = lambda model, major, minor: same_info
+s = FakeSession(FW1)
+lines, data = upgrade.upgrade(s, up_args(dry_run=True))
+restore_net()
+assert data["action"] == "none" and "Already on the latest build and Update" in "\n".join(lines), (lines, data)
+
+# a pack whose header names another Update than the directory it was published in
+stub_discovery()
+stub_download(good_pack(smallfixnum=2))
+s = FakeSession(FW0)
+try:
+    upgrade.upgrade(s, up_args(install_update=True, yes=True))
+    raise AssertionError("mislabelled pack accepted")
+except NasError as e:
+    assert "published as Update 1" in str(e), e
+restore_net()
+assert ("SYNO.Core.Upgrade.Patch", "upload", 1) not in s.calls, s.calls
+
 # same build, older micro: the full 7.4.1 image is an upgrade for a 7.4.0 box
 s = FakeSession("DSM 7.4.0-90080")
 upgrade._download_info = lambda model, major, minor: full_info

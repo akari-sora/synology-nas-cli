@@ -8,11 +8,13 @@ start (only with --yes) → wait for the reboot and for SessionData
 
 Update packs (7.4.1-90080 Update 1, not a new build) live apart from full
 images: `.../criticalupdate/update_pack/<build>-<nano>/synology_<arch>_<model>.pat`.
-When every open advisory is fixed by an Update on the installed build, the
-Update pack route is tried first; installing it needs the explicit
-`--install-update` flag on top of `--yes` (the pack flow has never been
-observed end to end on a real box). Every pack is identified by the header
-dict at its start before anything is uploaded.
+The Update pack route is taken when every open advisory is fixed by an Update
+on the installed build, and also when the box already runs the newest full
+build but Synology lists a newer Update for it. Installing a pack needs the
+explicit `--install-update` flag on top of `--yes`: the flow runs end to end
+against a fake DSM with Synology's real packs (tests/update_pack_e2e_check.py)
+but has not yet run on a real NAS. Every pack is identified by the header dict
+at its start before anything is uploaded.
 """
 
 from __future__ import annotations
@@ -65,9 +67,13 @@ def latest_pat(model: str, cur_major: int, cur_minor: int) -> dict:
         for item in block.get("items") or []:
             urls = [f.get("url") for f in item.get("files") or [] if ".pat" in (f.get("url") or "")]
             if urls:
+                try:
+                    nano = int(item.get("latest_nano"))
+                except (TypeError, ValueError):
+                    nano = None
                 return {"version": f"{item.get('build_ver')}-{item.get('build_num')}",
                         "build": int(item.get("build_num")), "required_build": int(item.get("required_num") or 0),
-                        "required_version": item.get("required_ver"), "url": urls[0]}
+                        "required_version": item.get("required_ver"), "url": urls[0], "latest_nano": nano}
     raise NasError(f"no .pat download found for {model}")
 
 
@@ -194,9 +200,13 @@ def _head(url: str) -> tuple:
     return status, size, etag
 
 
+def _is_md5(etag: str) -> bool:
+    return bool(re.fullmatch(r"[0-9a-fA-F]{32}", etag or ""))
+
+
 def _check_md5(path: str, etag: str) -> None:
     """When the CDN ETag is a bare MD5, the downloaded file must match it. Anything else: skip."""
-    if not re.fullmatch(r"[0-9a-fA-F]{32}", etag or ""):
+    if not _is_md5(etag):
         return
     h = hashlib.md5()
     with open(path, "rb") as f:
@@ -445,6 +455,54 @@ def _install(s, args, path: str, *, expected_build, target_fw, target_match: str
     return lines, data
 
 
+def _pack_route(s, args, fw: str, unique: str, nano: int, need, lines: list, data: dict):
+    """Find, download, verify and (with --install-update --yes) install Update `nano` for this build.
+
+    `need` is the Update the open advisories require (None when the pack is
+    simply the newest Update for an otherwise patched box). Nothing is
+    uploaded before the header names exactly this box, build and branch.
+    """
+    v = advisories.parse_dsm(fw)
+    build = v["build"]
+    url = _update_pack_url(unique, build, nano)
+    status, size, etag = _head(url)
+    pack = {"update": nano, "needed": need, "url": url, "status": status, "size": size}
+    if status != 200:
+        lines.append(f"No Update pack at {url} (HTTP {status}); install Update {nano} in "
+                     "Control Panel > Update & Restore.")
+        data.update(pack=pack, action="none")
+        return lines, data
+    lines.append(f"Update pack  DSM {v['branch3']}-{build} Update {nano} ({size:,} bytes, {url})")
+    data["pack"] = pack
+    if args.dry_run:
+        lines.append("Dry run: pack found; nothing downloaded or uploaded. "
+                     "Run `nas upgrade` to download and verify it, or "
+                     "`nas upgrade --install-update --yes` to download, verify and install it.")
+        data["action"] = "dry-run"
+        return lines, data
+    path = _download(url, args.download_dir, subdir=f"{build:d}-{nano:d}", md5=etag)
+    header = _check_update_pack(path, unique=unique, build=build, branch3=v["branch3"],
+                                cur_update=v["update"], min_update=need or 0)
+    if int(header["smallfixnum"]) != nano:
+        raise NasError(f"{path}: header says Update {header['smallfixnum']}, but it was published as "
+                       f"Update {nano}; refusing to upload")
+    target = f"DSM {header['productversion']}-{header['buildnum']} Update {header['smallfixnum']}"
+    lines.append(f"Verified     header ok: {header['unique']}, build {header['buildnum']}, "
+                 f"Update {header['smallfixnum']}" + (", checksum ok" if _is_md5(etag) else ""))
+    data["target"] = {"version": f"{header['productversion']}-{header['buildnum']}-{header['smallfixnum']}",
+                      "build": build, "update": int(header["smallfixnum"]),
+                      "url": url, "file": path, "update_pack": True}
+    if not (getattr(args, "install_update", False) and args.yes):
+        lines.append(f"Run `nas upgrade --install-update --yes` to upload and install it "
+                     f"(or `nas upgrade --pat {path} --yes`).")
+        data["action"] = "downloaded"
+        return lines, data
+    ilines, idata = _install(s, args, path, expected_build=build, target_fw=target,
+                             target_match="exact", rerun_hint="nas upgrade --install-update --yes",
+                             initial_fw=fw)
+    return lines + ilines, {**data, **idata}
+
+
 def upgrade(s, args):
     if s.backend_name != "password":
         raise NasError("`nas upgrade` needs --backend password (it uploads a file)")
@@ -502,7 +560,6 @@ def upgrade(s, args):
         # Every open advisory is an Update on this build: the Update pack
         # route, not a full image (F4: this check comes before any build
         # lookup, so 7.3.2-86009 Update 4 no longer errors on 7.4's requirement).
-        v = advisories.parse_dsm(fw)
         need = advisories.needed_update(fw)
         unique = _box_unique()
         nano = _latest_nano(_download_info(model, major, minor), build)
@@ -517,59 +574,36 @@ def upgrade(s, args):
                          "Control Panel > Update & Restore).")
             data.update(pack={"update": nano, "needed": need}, action="none")
             return lines, data
-        url = _update_pack_url(unique, build, nano)
-        status, size, etag = _head(url)
-        pack = {"update": nano, "needed": need, "url": url, "status": status, "size": size}
-        if status != 200:
-            lines.append(f"No Update pack at {url} (HTTP {status}); install Update {nano} in "
-                         "Control Panel > Update & Restore.")
-            data.update(pack=pack, action="none")
-            return lines, data
-        lines.append(f"Update pack DSM {v['branch3']}-{build} Update {nano} "
-                     f"({size:,} bytes, {url.split('?')[0]})")
-        data["pack"] = pack
-        if args.dry_run:
-            lines.append("Dry run: pack found; nothing downloaded or uploaded. "
-                         "Run without --dry-run to download and verify it, then "
-                         "`nas upgrade --install-update --yes` to install.")
-            data["action"] = "dry-run"
-            return lines, data
-        path = _download(url, args.download_dir, subdir=f"{build:d}-{nano:d}", md5=etag)
-        header = _check_update_pack(path, unique=unique, build=build, branch3=v["branch3"],
-                                    cur_update=v["update"], min_update=need)
-        target = f"DSM {header['productversion']}-{header['buildnum']} Update {header['smallfixnum']}"
-        lines.append(f"Verified     header ok: {header['unique']}, build {header['buildnum']}, "
-                     f"Update {header['smallfixnum']}")
-        data["target"] = {"version": f"{header['productversion']}-{header['buildnum']}-{header['smallfixnum']}",
-                          "build": build, "update": nano,
-                          "url": url, "file": path, "update_pack": True}
-        if not (getattr(args, "install_update", False) and args.yes):
-            lines.append(f"Run `nas upgrade --install-update --yes` to upload and install it "
-                         f"(or `nas upgrade --pat {path} --yes`).")
-            data["action"] = "downloaded"
-            return lines, data
-        ilines, idata = _install(s, args, path, expected_build=build, target_fw=target,
-                                 target_match="exact", rerun_hint="nas upgrade --install-update --yes",
-                                 initial_fw=fw)
-        return lines + ilines, {**data, **idata}
+        return _pack_route(s, args, fw, unique, nano, need, lines, data)
 
     pat = latest_pat(model, major, minor)
     lines.append(f"Latest       DSM {pat['version']} (needs ≥ {pat['required_version']}-{pat['required_build']})")
     lines.append(f"Download     {pat['url'].split('?')[0]}")
     pat_key = _product_key("DSM " + pat["version"])
+    if pat_key[:4] == cur_key[:4] and pat.get("latest_nano") is not None \
+            and pat["latest_nano"] > cur_key[4]:
+        # Newest full build already installed, but Synology lists a newer
+        # Update for it: that is an Update pack, not a full image.
+        data["latest"] = pat
+        if not (config.get().get("dsm_unique") or "").strip():
+            # no advisory needs it: report it instead of failing on the missing setting
+            lines.append(f"Synology lists Update {pat['latest_nano']} for build {build}; set `dsm_unique` in the "
+                         "config (on the NAS: `grep ^unique= /etc.defaults/synoinfo.conf`) to let `nas upgrade` "
+                         "fetch and verify it, or install it in Control Panel > Update & Restore.")
+            data.update(pack={"update": pat["latest_nano"], "needed": None}, action="none")
+            return lines, data
+        return _pack_route(s, args, fw, _box_unique(), pat["latest_nano"], None, lines, data)
     if pat_key < cur_key:
         if args.force:
             raise NasError(f"target DSM {pat['version']} is older than {fw}; --force does not downgrade")
-        lines.append("Already on the latest build; nothing to do.")
+        lines.append("Already on the latest build and Update; nothing to do.")
         data.update(latest=pat, action="none")
         return lines, data
     if pat_key == cur_key and not args.force:
         # Same product version and build (a newer micro shares the build
         # number, e.g. 7.4.0-90080 vs 7.4.1-90080, and does NOT land here).
-        lines.append(f"Already on the newest full build (build {build}); nothing to download.")
-        lines.append("If DSM offers an Update for this build, install it in Control Panel > "
-                     "Update & Restore: `nas upgrade` only finds full builds "
-                     "(--force reinstalls this one).")
+        lines.append(f"Already on the newest full build (build {build}) and Synology lists no newer "
+                     "Update for it; nothing to download.")
         data.update(latest=pat, action="none")
         return lines, data
     if build < pat["required_build"]:
