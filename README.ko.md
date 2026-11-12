@@ -104,7 +104,7 @@ ln -s "$PWD/bin/nas" ~/bin/nas       # optional: put `nas` on PATH
 ### GitLab 릴리스 또는 로컬 체크아웃에서 `pip`로 설치
 
 ```bash
-pip install https://gitlab.com/aa22396584/synology-nas-cli/-/archive/v1.2.0/synology-nas-cli-v1.2.0.tar.gz
+pip install https://gitlab.com/aa22396584/synology-nas-cli/-/archive/v1.3.0/synology-nas-cli-v1.3.0.tar.gz
 # or from a local checkout:
 pip install -e .                     # or: pipx install .
 nas --help

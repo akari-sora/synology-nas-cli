@@ -8,7 +8,7 @@ The sequence an agent follows from a fresh machine to an audited, hardened and m
 git clone https://gitlab.com/aa22396584/synology-nas-cli.git synology-nas-cli && cd synology-nas-cli
 ./bin/nas --version                     # exit 0; needs Python 3.8+ (stdlib only)
 # or, as a package with a `nas` command:
-pip install -e .                        # or: pip install https://gitlab.com/aa22396584/synology-nas-cli/-/archive/v1.2.0/synology-nas-cli-v1.2.0.tar.gz
+pip install -e .                        # or: pip install https://gitlab.com/aa22396584/synology-nas-cli/-/archive/v1.3.0/synology-nas-cli-v1.3.0.tar.gz
 # on Windows:
 py -3 bin\nas --version
 ```
@@ -50,7 +50,7 @@ The password is never written to the config; the config file is mode 600 and hol
 nas doctor --json
 ```
 
-`{"checks": [{"name", "status": "ok|warn|fail|skip", "detail", "next_step"}], "ok"}`; exit 0 when no check is `fail`. Checks: `config`, `credentials`, `origin`, `tls`, `login`, `dsm_version`, `two_factor`, `capabilities`, `clock`. `dsm_version` fails when SA-26:13 or SA-26:19 is unpatched (a build past SA-26:13 can still miss SA-26:19). For each `fail`, run its `next_step` (a command) or relay it (a question), then run Step 3 again.
+`{"checks": [{"name", "status": "ok|warn|fail|skip", "detail", "next_step"}], "ok"}`; exit 0 when no check is `fail`. Checks: `config`, `credentials`, `origin`, `tls`, `login`, `dsm_version`, `two_factor`, `capabilities`, `clock`. `dsm_version` fails when SA-26:13, SA-26:18 or SA-26:19 is unpatched (a build past SA-26:13 can still miss SA-26:18/19). For each `fail`, run its `next_step` (a command) or relay it (a question), then run Step 3 again.
 
 ## Step 4: audit
 

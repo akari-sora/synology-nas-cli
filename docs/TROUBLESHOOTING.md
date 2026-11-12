@@ -211,7 +211,7 @@ Error codes come from two layers: common session/dispatcher codes (`100`–`150`
 
 ### Symptoms
 
-- `Control Panel > Update & Restore > DSM Update` (`控制台 > 更新與還原 > 系統更新`) displays **"Your DSM version is up to date"**, yet `nas status`, `nas doctor`, or `nas incident` reports `dsm_version FAIL` (for example, the unit is on `DSM 7.1.1-42962 Update 9`, an older `7.2.x` build missing the SA-26:13 patch, or `DSM 7.3.2-86009 Update 4`, which is past SA-26:13 and still missing SA-26:19).
+- `Control Panel > Update & Restore > DSM Update` (`控制台 > 更新與還原 > 系統更新`) displays **"Your DSM version is up to date"**, yet `nas status`, `nas doctor`, or `nas incident` reports `dsm_version FAIL` (for example, the unit is on `DSM 7.1.1-42962 Update 9`, an older `7.2.x` build missing the SA-26:13 patch, or `DSM 7.3.2-86009 Update 4`, which is past SA-26:13 and still missing SA-26:18/SA-26:19).
 
 ### Cause
 

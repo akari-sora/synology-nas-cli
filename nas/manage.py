@@ -46,9 +46,16 @@ def _wait(fn, timeout: float, interval: float = 3.0, what: str = ""):
         time.sleep(interval)
 
 
-def _default_volume(s) -> str:
-    return need("SYNO.Core.Package.Setting.Volume",
-                s.call("SYNO.Core.Package.Setting.Volume", "get", version=1)).get("default_vol")
+def _default_volume(s):
+    """DSM's default package install volume, or None when none is set.
+
+    DSM answers code 4501 when it has no default, e.g. after the volume it
+    pointed at was removed; that is a state to report, not a failure.
+    """
+    r = s.call("SYNO.Core.Package.Setting.Volume", "get", version=1)
+    if not r.get("ok") and (r.get("error") or {}).get("code") == 4501:
+        return None
+    return need("SYNO.Core.Package.Setting.Volume", r).get("default_vol")
 
 
 def pkg(s, args):
@@ -59,8 +66,14 @@ def pkg(s, args):
         for p in sorted(pk.values(), key=lambda p: p["id"].lower()):
             lines.append(f"{p['id']:<20} {p['version']:<18} {p['status']:<8} {p['volume']:<9} "
                          f"{'yes' if p['startable'] else 'no'}")
-        lines.append(f"default install volume: {_default_volume(s)}")
-        return lines, {"packages": list(pk.values()), "default_volume": _default_volume(s)}
+        try:
+            dv = _default_volume(s)
+            lines.append(f"default install volume: {dv}" if dv else
+                         "default install volume: none set (DSM 4501); set one with `nas pkg default-volume /volumeN`")
+        except NasError as e:  # the package list still stands
+            dv = None
+            lines.append(f"default install volume: unavailable ({e})")
+        return lines, {"packages": list(pk.values()), "default_volume": dv}
 
     if act == "default-volume":
         if args.pkg_id:
@@ -68,7 +81,9 @@ def pkg(s, args):
             need("SYNO.Core.Package.Setting.Volume",
                  s.call("SYNO.Core.Package.Setting.Volume", "set", version=1, params={"default_vol": vol}))
         cur = _default_volume(s)
-        return [f"default install volume: {cur}"], {"default_volume": cur}
+        return [f"default install volume: {cur}" if cur else
+                "default install volume: none set (DSM 4501); set one with `nas pkg default-volume /volumeN`"], \
+            {"default_volume": cur}
 
     if not args.pkg_id:
         raise NasError(f"`nas pkg {act}` needs a package ID (see `nas pkg list`)")

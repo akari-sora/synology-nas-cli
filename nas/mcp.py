@@ -75,7 +75,7 @@ TOOLS = {
                "detail, next_step}.", _obj(), READ, lambda a: ["doctor"]),
     "whoami": ("Sign in and show backend, origin, credential source, account, admin flag and DSM version.",
                _obj(), READ, lambda a: ["whoami"]),
-    "status": ("Model, DSM version, uptime, SA-26:13, SA-26:19 and the overall DSM-patch verdict "
+    "status": ("Model, DSM version, uptime, SA-26:13, SA-26:18, SA-26:19 and the overall DSM-patch verdict "
                "(patched only when every tracked advisory is).", _obj(), READ, lambda a: ["status"]),
     "health": ("Disks (SMART, temperature), storage pools, volumes, UPS, CPU and memory.", _obj(), READ,
                lambda a: ["health"]),

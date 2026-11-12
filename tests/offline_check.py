@@ -132,6 +132,39 @@ assert not advisories.update_gap_only("DSM 7.4.0-90080")
 assert not advisories.update_gap_only("DSM 7.3.1-86009 Update 5")
 assert not advisories.update_gap_only("DSM 7.1.1-42962 Update 9")
 assert not advisories.update_gap_only("garbage")
+# SA-26:18 (25 CVEs, same day as SA-26:19): DSM 7.4/7.3 only, same fixed releases as SA-26:19
+for fw, want in (("DSM 7.4.1-90080", "vulnerable"), ("DSM 7.4.1-90080 Update 1", "patched"),
+                 ("DSM 7.3.2-86009 Update 4", "vulnerable"), ("DSM 7.3.2-86009 Update 5", "patched"),
+                 ("DSM 7.3.1-86009 Update 9", "vulnerable"), ("DSM 7.2.2-72806 Update 9", "not_affected"),
+                 ("DSM 7.2.1-69057 Update 13", "not_affected"), ("DSM 7.5-1", "unknown")):
+    got18 = advisories.dsm_advisory_verdict(fw, "sa_26_18")
+    assert got18["status"] == want, (fw, got18)
+assert len(advisories.SA_26_18["cves"]) == 25 and len(advisories.SA_26_19["cves"]) == 2  # the "27 vulnerabilities"
+# not_affected never blocks the aggregate, and is named as such
+agg = advisories.dsm_verdict("DSM 7.2.2-72806 Update 10")
+assert agg["status"] == "patched" and agg["advisories"]["sa_26_18"]["status"] == "not_affected", agg
+assert "SA-26:18 not affected" in advisories.dsm_detail("DSM 7.2.2-72806 Update 10", agg)
+# advisories needing the same step share one note; the Update route still applies with SA-26:18 open
+u0 = advisories.dsm_verdict("DSM 7.4.1-90080")
+assert u0["note"].startswith("SA-26:18, SA-26:19: this build needs Update 1"), u0["note"]
+assert u0["note"].count("nas upgrade --install-update") == 1, u0["note"]
+assert advisories.update_gap_only("DSM 7.4.1-90080") and advisories.needed_update("DSM 7.4.1-90080") == 1
+assert advisories.update_gap_only("DSM 7.2.2-72806 Update 9") and advisories.needed_update("DSM 7.2.2-72806 Update 9") == 10
+# packages: SA-26:14 fixes are per DSM release line; SA-26:17 Plex
+pv = advisories.package_verdict
+assert pv("PHP7.4", "7.4.33-0122", "DSM 7.1.1-42962 Update 9")["status"] == "patched"      # the 7.0-7.1 build
+assert pv("PHP7.4", "7.4.33-0120", "DSM 7.1.1-42962 Update 9")["status"] == "vulnerable"
+assert pv("PHP7.4", "7.4.33-0122", "DSM 7.4.1-90080 Update 1")["fixed_in"] == "7.4.33-0131"
+assert pv("Calendar", "2.4.8-10948", "DSM 7.1.1-42962")["status"] == "patched"
+assert pv("MailStation", "30000002.3.19-0333", "DSM 6.2.4-25556 Update 8")["status"] == "patched"
+assert pv("PHP8.0", "8.0.30-0104", "DSM 6.2.4-25556")["status"] == "unknown"               # no 6.2 build listed
+assert pv("PHP7.3", "7.3.29-0001", "DSM 7.4.1-90080")["status"] == "no_fix"
+assert pv("PlexMediaServer", "1.42.2.10156-720010156", "DSM 7.4.1-90080 Update 1") == {
+    "advisory": "SA-26:17", "url": advisories.SA_26_17["url"], "status": "vulnerable",
+    "fixed_in": "1.43.5.11079-720011079"}
+assert pv("PlexMediaServer", "1.43.5.11079-700011079", "DSM 7.2.2-72806 Update 10")["status"] == "patched"
+assert pv("PlexMediaServer", "1.43.5.11079-720011079", None)["status"] == "patched"
+assert pv("SynoFinder", "1.9.0-0900", "DSM 7.4.1-90080") is None
 # the Update pack route: needed_update is the highest Update closing every open advisory
 assert advisories.needed_update("DSM 7.4.1-90080 Update 0") == 1
 assert advisories.needed_update("DSM 7.3.2-86009 Update 4") == 5
@@ -285,4 +318,22 @@ finally:
         os.environ["TERM"] = _term
     sys.stdout.isatty = _tty
 assert _cli._paint(_sample) == _sample or sys.stdout.isatty(), "plain when stdout is not a terminal"
+# `nas pkg list` survives an unreadable default install volume (DSM 4501 after that volume was removed)
+from nas import manage as _manage
+
+
+class _PkgSession:
+    def call(self, api, method, params=None, version=None, timeout=None):
+        if api == "SYNO.Core.Package":
+            return {"ok": True, "data": {"packages": [{"id": "Tailscale", "version": "1.58.2-700058002",
+                                                       "additional": {"status": "running", "startable": True,
+                                                                      "installed_info": {"path": "/volume1/@appstore/Tailscale"}}}]}}
+        return {"ok": False, "error": {"code": 4501}, "version": 1}
+
+
+_pl, _pd = _manage.pkg(_PkgSession(), types.SimpleNamespace(action="list", pkg_id=None))
+assert _pd["default_volume"] is None and _pd["packages"][0]["id"] == "Tailscale", _pd
+assert "none set" in _pl[-1] and "4501" in _pl[-1], _pl
+_vl, _vd = _manage.pkg(_PkgSession(), types.SimpleNamespace(action="default-volume", pkg_id=None))
+assert _vd == {"default_volume": None} and "none set" in _vl[0], (_vl, _vd)
 print(f"offline checks ok (python {sys.version.split()[0]})")

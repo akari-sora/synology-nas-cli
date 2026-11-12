@@ -17,7 +17,7 @@ One pass of checks. Exit status 0 when nothing is at warning/critical level (inf
 | code | level | kind | when |
 |---|---|---|---|
 | `firewall_off` | critical | condition | DSM firewall off |
-| `dsm_unpatched` | critical | condition | DSM build is not patched for every tracked advisory (SA-26:13 and SA-26:19), including a branch with no fix |
+| `dsm_unpatched` | critical | condition | DSM build is not patched for every tracked advisory (SA-26:13, SA-26:18 and SA-26:19), including a branch with no fix |
 | `dsm_behind` | warning | condition | older than `latest_dsm` (only when set); compares build **and** Update, so `7.4.1-90080-1` flags Update 0 but not Update 1 |
 | `dsm_update_available` | info | condition | Synology's update server offers an update |
 | `disk_status` / `disk_smart` | warning | condition | a disk's status or SMART is not normal |
