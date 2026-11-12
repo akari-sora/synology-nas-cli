@@ -91,8 +91,10 @@ def _latest_nano(info: dict, build: int):
 
 _PACK_RE = re.compile(rb"\{'archive_type'\s*:\s*'update_pack'.*?\}", re.S)
 
-
-_PACK_MAGIC = b"\xb6\xad\xbe\xef"
+# Observed Update-pack magics (first 4 bytes): b6adbeef on 716+, acadbeef on
+# 916+. The magic varies by model, so it is only a refusal hint for --pat,
+# never an identity check; the header dict is the guarantee.
+_PACK_MAGICS = (b"\xb6\xad\xbe\xef", b"\xac\xad\xbe\xef")
 
 
 def _pack_header(data: bytes):
@@ -463,15 +465,18 @@ def upgrade(s, args):
     if args.pat:
         # A hand-picked file: full images keep the legacy path; Update packs
         # are identified before anything is uploaded (same-size packs for
-        # other models download fine, so size proves nothing). A pack-magic
-        # file without a readable header is refused, not treated as a full
-        # image: its type is known, its identity is not.
+        # other models download fine, so size proves nothing). A file that
+        # looks like an Update pack but has no readable header is refused, not
+        # treated as a full image: its type is known, its identity is not.
+        # (Pack magic varies by model -- b6adbeef on 716+, acadbeef on 916+ --
+        # so both the known magics and the marker string trigger the refusal;
+        # full images, magic 15adbeef, contain no such marker.)
         path = os.path.abspath(args.pat)
         with open(path, "rb") as f:
             raw = f.read(8192)
         header = _pack_header(raw)
         if header is None:
-            if raw[:4] == _PACK_MAGIC:
+            if raw[:4] in _PACK_MAGICS or b"update_pack" in raw:
                 raise NasError(f"{path}: looks like an Update pack but its header is unreadable; "
                                "refusing to upload an unidentified file")
             data["target"] = {"version": "(from file)", "build": None, "url": None, "file": path}

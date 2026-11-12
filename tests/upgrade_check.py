@@ -357,6 +357,20 @@ except NasError as e:
 assert ("SYNO.Core.Upgrade.Patch", "upload", 1) not in s.calls, s.calls
 os.remove(pat_path)
 
+# other models use a different pack magic (acadbeef on 916+): a broken header
+# with the marker string is still refused, not mistaken for a full image
+fd, pat_path = tempfile.mkstemp(suffix=".pat")
+os.write(fd, b"\xac\xad\xbe\xef" + b"\x00" * 240 + b"{'archive_type': 'update_pack', broken")
+os.close(fd)
+s = FakeSession(FW0)
+try:
+    upgrade.upgrade(s, up_args(pat=pat_path, yes=True))
+    raise AssertionError("marker-broken pack accepted")
+except NasError as e:
+    assert "unreadable" in str(e), e
+assert ("SYNO.Core.Upgrade.Patch", "upload", 1) not in s.calls, s.calls
+os.remove(pat_path)
+
 # --- wait_until_ready ---------------------------------------------------------------
 
 import time as _time
