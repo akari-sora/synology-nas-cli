@@ -6,8 +6,8 @@ A practical hardening checklist for Synology DSM 7 systems, built from Synology 
 
 | # | Area | Check command | Apply command |
 |---|---|---|---|
-| 1 | DSM version & security patches (SA-26:19, SA-26:13, SA-24:20) | `nas status`, `nas doctor`, `nas incident` | `nas upgrade --yes`, `nas upgrade --install-update --yes` (Update pack) or `nas incident fix --upgrade --yes` |
-| 2 | Vulnerable or unused packages (SA-26:14 PHP2Shell) | `nas inventory`, `nas pkg list`, `nas incident` | `nas incident fix --only packages --yes`, `nas pkg stop ID`, `nas pkg uninstall ID` |
+| 1 | DSM version & security patches (SA-26:19, SA-26:18, SA-26:13, SA-24:20) | `nas status`, `nas doctor`, `nas incident` | `nas upgrade --yes`, `nas upgrade --install-update --yes` (Update pack) or `nas incident fix --upgrade --yes` |
+| 2 | Vulnerable or unused packages (SA-26:14 PHP2Shell, SA-26:17 Plex2Shell) | `nas inventory`, `nas pkg list`, `nas incident` | `nas incident fix --only packages --yes`, `nas pkg stop ID`, `nas pkg uninstall ID` |
 | 3 | Default-deny DSM firewall on all interfaces | `nas net`, `nas exposure`, `nas incident --probe` | `nas incident fix --only firewall --yes` |
 | 4 | QuickConnect & router UPnP port forwarding off | `nas services`, `nas incident` | `nas incident fix --only quickconnect,router_port_forwarding --yes` |
 | 5 | VPN / Tailscale instead of public port forwards | `nas tailscale status` | `nas tailscale login-url` |
@@ -40,7 +40,10 @@ A practical hardening checklist for Synology DSM 7 systems, built from Synology 
   ```
   Over SSH on the NAS, `cat /etc.defaults/VERSION` shows the exact `buildnumber` and `smallfixnumber` (Update level).
 
-## 2. Update or stop vulnerable and unused packages (SA-26:14 "PHP2Shell")
+- **SA-26:18 (2026-11-10):** [Synology-SA-26:18](https://www.synology.com/en-global/security/advisory/Synology_SA_26_18) fixes 25 further DSM CVEs (e.g. CVE-2026-13672, SSOAuth authorization bypass, CVSS 8.8) in DSM 7.4.1-90080-1 and 7.3.2-86009-5 or later; DSM 7.2 is not listed. Together with SA-26:19 these are the 27 DSM vulnerabilities announced on 2026-11-10; on 7.4/7.3 the same Update fixes both. `nas status` adds `sa_26_18` (`not_affected` on DSM 7.2.x), and `dsm_patch`, `dsm_version` and `dsm_unpatched` include it.
+- **Automatic updates:** SA-26:18/19 shipped as DSM Updates, which DSM installs by itself when Control Panel > Update & Restore > DSM Update > Update Settings is set to install important updates. `nas incident` reports this as `dsm_auto_update` (WARN when DSM only notifies).
+
+## 2. Update or stop vulnerable and unused packages (SA-26:14 "PHP2Shell", SA-26:17 "Plex2Shell")
 
 - **Why:** [Synology-SA-26:14](https://www.synology.com/en-global/security/advisory/Synology_SA_26_14) fixes CVE-2026-109618 and CVE-2026-109619 (CVSS 3.1 9.8) in Synology Calendar (`3.0.4-21435`), MailStation (`30000002.3.19-20333`), and PHP 7.4–8.4 (`7.4.33-0131`, `8.0.30-0122`, `8.1.34-0120`, `8.2.35-0171`, `8.3.36-0051`, `8.4.27-0051`). PHP 7.3 is end-of-life with no fix. Stopping or uninstalling packages you do not use shrinks the exposed web attack surface ([Synology Security Tutorial](https://kb.synology.com/zh-tw/DSM/tutorial/How_to_add_extra_security_to_your_Synology_NAS), [CISA KEV alert](https://www.cisa.gov/news-events/alerts/2026/10/26/cisa-adds-two-known-exploited-vulnerabilities-catalog)). Note that Hyper Backup depends on PHP 7.4 on some setups, so stop or update PHP 7.4 rather than blindly uninstalling it if Hyper Backup is installed ([Dongyun Lab, 2026-10-29](https://dylab.org/archives/1128)).
 - **DSM UI path:**
@@ -48,9 +51,9 @@ A practical hardening checklist for Synology DSM 7 systems, built from Synology 
   - 繁體中文：`套件中心 > 已安裝`（以及 `套件中心 > 設定 > 自動更新`）
 - **`nas` commands:**
   ```bash
-  nas inventory                       # lists installed packages and flags SA-26:14 versions
+  nas inventory                       # lists installed packages and flags SA-26:14 / SA-26:17 versions (per-DSM fixed builds)
   nas pkg list                        # lists all packages with version and running status
-  nas incident fix --only packages --yes   # stops running SA-26:14 vulnerable packages
+  nas incident fix --only packages --yes   # stops running SA-26:14 / SA-26:17 vulnerable packages
   nas pkg stop PHP7.4                 # stops a specific package
   nas pkg uninstall PHP7.3            # uninstalls an end-of-life package
   ```

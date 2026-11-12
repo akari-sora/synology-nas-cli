@@ -53,8 +53,10 @@ def _onoff(v) -> str:
 def _advisory_line(v: dict, title: str = "") -> str:
     """One verdict. title overrides the advisory name (the overall DSM-patch line)."""
     name = title or v.get("advisory") or "DSM"
-    text = f"{name:<13}{v['status']}"
-    if v["status"] != "patched" and v.get("note"):
+    text = f"{name:<13}{v['status'].replace('_', ' ') if v['status'] == 'not_affected' else v['status']}"
+    if v["status"] == "not_affected" and v.get("note"):
+        text += f" ({v['note']})"
+    elif v["status"] != "patched" and v.get("note"):
         text += f" — {v['note']}"
     elif v.get("fixed_in") and v["status"] == "patched":
         text += f" [fixed in {v['fixed_in']}]"
@@ -90,6 +92,7 @@ def status(s, args):
         "sys_temp_c": d.get("sys_temp"),
         "ram_mb": d.get("ram_size"),
         "sa_26_13": report["advisories"]["sa_26_13"],
+        "sa_26_18": report["advisories"]["sa_26_18"],
         "sa_26_19": report["advisories"]["sa_26_19"],
         "dsm_patch": patch,
         "latest_for_model": latest,
@@ -99,6 +102,7 @@ def status(s, args):
         f"DSM          {fw}  (released {data['firmware_date']})",
         f"Uptime       {data['uptime']}  (NAS clock {data['nas_time']})",
         _advisory_line(data["sa_26_13"]),
+        _advisory_line(data["sa_26_18"]),
         _advisory_line(data["sa_26_19"]),
         _advisory_line(patch, "DSM patch"),
     ]
@@ -254,16 +258,19 @@ def services(s, args):
 # --- inventory ------------------------------------------------------------
 
 def inventory(s, args):
-    r_sh, r_pkg, r_ct, r_usr, r_task = s.call_many([
+    r_sh, r_pkg, r_ct, r_usr, r_task, r_sys = s.call_many([
         {"api": "SYNO.FileStation.List", "method": "list_share", "version": 2},
         {"api": "SYNO.Core.Package", "method": "list", "params": {"additional": ["status"]}, "version": 1},
         {"api": "SYNO.Docker.Container", "method": "list", "params": {"limit": "-1", "offset": "0", "type": "all"}},
         {"api": "SYNO.Core.User", "method": "list",
          "params": {"type": "local", "offset": "0", "limit": "-1", "additional": ["expired", "2fa_status"]}, "version": 1},
         {"api": "SYNO.Core.TaskScheduler", "method": "list", "params": {"offset": "0", "limit": "-1"}},
+        {"api": "SYNO.Core.System", "method": "info", "version": 1},
     ])
     lines = []
     data = {}
+    si, _ = part("SYNO.Core.System", r_sys)
+    fw = (si or {}).get("firmware_ver")  # per-DSM package fixes (SA-26:14 builds differ for DSM 7.0-7.1, 6.2)
 
     sh, e = part("SYNO.FileStation.List", r_sh)
     data["shares"] = [x.get("path") for x in (sh or {}).get("shares", [])]
@@ -273,14 +280,16 @@ def inventory(s, args):
     data["packages"] = []
     lines.append("Packages" + (f"     (unavailable: {e})" if e else ""))
     for p in (pk or {}).get("packages", []):
-        v = advisories.package_verdict(p.get("id"), p.get("version", ""))
+        v = advisories.package_verdict(p.get("id"), p.get("version", ""), fw)
         row = {"id": p.get("id"), "version": p.get("version"),
-               "status": (p.get("additional") or {}).get("status"), "sa_26_14": v}
+               "status": (p.get("additional") or {}).get("status"), "advisory": v,
+               "sa_26_14": v if v and v.get("advisory") == "SA-26:14" else None}
         data["packages"].append(row)
-        flag = f"  SA-26:14 {v['status']}" + (f" (fixed {v['fixed_in']})" if v.get("fixed_in") else "") if v else ""
+        flag = (f"  {v['advisory']} {v['status']}" + (f" (fixed {v['fixed_in']})" if v.get("fixed_in") else "")
+                if v else "")
         lines.append(f"  {row['id']:<22} {row['version']:<16} {row['status']}{flag}")
-    named = [r["id"] for r in data["packages"] if r["sa_26_14"]]
-    lines.append("  SA-26:14 packages installed: " + (", ".join(named) if named else "none"))
+    named = [f"{r['id']} ({r['advisory']['advisory']})" for r in data["packages"] if r["advisory"]]
+    lines.append("  SA-26:14 / SA-26:17 packages installed: " + (", ".join(named) if named else "none"))
 
     ct, e = part("SYNO.Docker.Container", r_ct)
     data["containers"] = [{"name": c.get("name"), "status": c.get("status"), "image": c.get("image")}

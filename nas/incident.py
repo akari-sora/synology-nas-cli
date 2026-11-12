@@ -1,5 +1,5 @@
 """`nas incident`: audit a DSM box against the C3RB3R / .L0CK3D ransomware campaign
-(Synology-SA-26:13, SA-26:19, SA-26:14), and `nas incident fix`: apply the hardening in one go.
+(Synology-SA-26:13, SA-26:18, SA-26:19, SA-26:14, SA-26:17), and `nas incident fix`: apply the hardening in one go.
 
 Audit (read-only): every item is PASS / WARN / FAIL / SKIP with a one-line hint;
 exit status 1 when any item is FAIL. --probe opens TCP connections to the public
@@ -111,6 +111,7 @@ _READS = [
                                                      "limit": -1}),
     ("pf", "SYNO.Core.PortForwarding.Rules", "load", 1, None),
     ("dsm_web", "SYNO.Core.Web.DSM", "get", None, None),
+    ("autoupd", "SYNO.Core.Upgrade.Setting", "get", None, None),
 ]
 
 
@@ -236,7 +237,7 @@ def evaluate(f, args) -> list:
     add = items.append
     sysinfo, e_sys = f["sys"]
 
-    # 1. DSM build vs SA-26:13 and SA-26:19 (PASS only when every tracked advisory is patched)
+    # 1. DSM build vs SA-26:13, SA-26:18 and SA-26:19 (PASS only when every tracked advisory is patched)
     if sysinfo is None:
         add(item("dsm_version", SKIP, f"cannot read DSM version: {e_sys}"))
     else:
@@ -256,31 +257,50 @@ def evaluate(f, args) -> list:
                 add(item("dsm_version", FAIL, detail,
                          "nas upgrade --dry-run, then `nas incident fix --upgrade` (the NAS reboots)", "upgrade"))
 
-    # 2. SA-26:14 packages
+    # 1b. DSM installs security Updates by itself (SA-26:19 / SA-26:18 shipped as Updates)
+    au, e_au = f.get("autoupd") or (None, "not read")
+    if au is None:
+        add(item("dsm_auto_update", SKIP, f"cannot read the DSM update settings: {e_au}"))
+    else:
+        kind = str(au.get("autoupdate_type") or "").strip()
+        k = kind.lower()
+        hint = ("Control Panel > Update & Restore > DSM Update > Update Settings: \"Automatically install important "
+                "updates\" (控制台 > 更新與還原 > 系統更新 > 更新設定)")
+        if k in ("hotfix-security", "hotfix", "security", "important", "all") or "security" in k:
+            add(item("dsm_auto_update", PASS, f"DSM installs important updates by itself (autoupdate_type {kind})"))
+        elif k in ("", "none", "notify", "manual", "disable", "disabled", "off", "check"):
+            add(item("dsm_auto_update", WARN, f"DSM does not install security updates by itself "
+                                              f"(autoupdate_type {kind or 'unset'})", hint))
+        else:
+            add(item("dsm_auto_update", WARN, f"unrecognised autoupdate_type {kind!r}; check the setting", hint))
+
+    # 2. packages named in SA-26:14 (PHP2Shell) and SA-26:17 (Plex2Shell); the item id stays sa_26_14_packages
     pk, e = f["pkgs"]
+    fw_pkg = (sysinfo or {}).get("firmware_ver")
     if pk is None:
         add(item("sa_26_14_packages", SKIP, f"cannot list packages: {e}"))
     else:
         running, stopped, ok = [], [], []
         for p in pk.get("packages", []):
-            verdict = advisories.package_verdict(p.get("id"), p.get("version", ""))
+            verdict = advisories.package_verdict(p.get("id"), p.get("version", ""), fw_pkg)
             if verdict is None:
                 continue
             status = (p.get("additional") or {}).get("status")
-            label = f"{p.get('id')} {p.get('version')} ({status})"
+            label = f"{p.get('id')} {p.get('version')} ({verdict['advisory']}, {status})"
             if verdict["status"] == "patched":
                 ok.append(label)
             else:
                 (running if status == "running" else stopped).append(label)
         if running:
-            add(item("sa_26_14_packages", FAIL, "vulnerable to SA-26:14 and running: " + ", ".join(running + stopped),
+            add(item("sa_26_14_packages", FAIL, "vulnerable package running: " + ", ".join(running + stopped),
                      "update in Package Center, or stop/uninstall; `nas incident fix` stops running ones", "packages"))
         elif stopped:
-            add(item("sa_26_14_packages", WARN, "vulnerable to SA-26:14, stopped: " + ", ".join(stopped),
+            add(item("sa_26_14_packages", WARN, "vulnerable package, stopped: " + ", ".join(stopped),
                      "update in Package Center (or uninstall) before starting it again"))
         else:
             add(item("sa_26_14_packages", PASS, ("patched: " + ", ".join(ok)) if ok else
-                     "none of Calendar, MailStation, PHP 7.3-8.4 installed"))
+                     "none of Calendar, MailStation, PHP 7.3-8.4 (SA-26:14) or Plex Media Server "
+                     "(SA-26:17) installed"))
 
     # 3. firewall
     fw, e = f["fw"]
@@ -904,10 +924,11 @@ def plan(s, f, args) -> list:
             out.append(_change("snapshots", share, "no snapshot schedule", after, calls, verify=verify,
                                refused=rotate_why, note=note))
 
-    # packages named in SA-26:14 that are running
+    # packages named in SA-26:14 / SA-26:17 that are running
     pk, _ = f["pkgs"]
+    fw_pkg = ((f.get("sys") or (None, None))[0] or {}).get("firmware_ver")
     for p in (pk or {}).get("packages", []):
-        v = advisories.package_verdict(p.get("id"), p.get("version", ""))
+        v = advisories.package_verdict(p.get("id"), p.get("version", ""), fw_pkg)
         status = (p.get("additional") or {}).get("status")
         if v and v["status"] != "patched" and status == "running":
             pid = p["id"]
@@ -916,7 +937,7 @@ def plan(s, f, args) -> list:
                 d = need("SYNO.Core.Package", s_.call("SYNO.Core.Package", "list", {"additional": ["status"]}, version=1))
                 st = next(((x.get("additional") or {}).get("status") for x in d.get("packages", []) if x.get("id") == pid), None)
                 return st != "running", f"status {st}"
-            out.append(_change("packages", pid, f"{p.get('version')} running (SA-26:14 {v['status']})", "stopped",
+            out.append(_change("packages", pid, f"{p.get('version')} running ({v['advisory']} {v['status']})", "stopped",
                                [call("SYNO.Core.Package.Control", "stop", 1, {"id": pid})], verify=verify,
                                note=f"update to {v['fixed_in']} in Package Center" if v.get("fixed_in")
                                else "no fixed version: uninstall it"))

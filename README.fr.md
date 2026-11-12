@@ -96,7 +96,7 @@ ln -s "$PWD/bin/nas" ~/bin/nas       # optional: put `nas` on PATH
 ### Avec `pip` depuis une version GitLab ou un clone local
 
 ```bash
-pip install https://gitlab.com/aa22396584/synology-nas-cli/-/archive/v1.2.0/synology-nas-cli-v1.2.0.tar.gz
+pip install https://gitlab.com/aa22396584/synology-nas-cli/-/archive/v1.3.0/synology-nas-cli-v1.3.0.tar.gz
 # or from a local checkout:
 pip install -e .                     # or: pipx install .
 nas --help

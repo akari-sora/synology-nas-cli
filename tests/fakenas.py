@@ -49,7 +49,10 @@ class FakeNas:
             ("SYNO.Core.System", "info"): ok({"firmware_ver": "DSM 7.1.1-42962 Update 9", "time": "2026-10-30 12:00:00"}),
             ("SYNO.Core.Package", "list"): ok({"packages": [
                 {"id": "PHP7.4", "version": "7.4.33-0120", "additional": {"status": st["php"]}},
-                {"id": "Calendar", "version": "3.0.4-21435", "additional": {"status": "running"}}]}),
+                {"id": "Calendar", "version": "3.0.4-21435", "additional": {"status": "running"}}]
+                + st.get("extra_pkgs", [])}),
+            ("SYNO.Core.Upgrade.Setting", "get"): ok({"autoupdate_type": st.get("autoupd", "notify"),
+                                                      "smart_nano_enabled": True}),
             ("SYNO.Core.Security.Firewall", "get"): ok({"enable_firewall": st["fw_on"], "profile_name": "default"}),
             ("SYNO.Core.Security.Firewall.Profile", "get"): ok(copy.deepcopy(st["profile"])),
             ("SYNO.Core.Security.Firewall.Adapter", "list"): ok({"adapter_names": ["eth0", "global", "pppoe"]}),

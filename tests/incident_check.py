@@ -20,7 +20,7 @@ incident.get_proxies = lambda: {}
 nas = FakeNas()
 lines, data, rc = incident.audit(FakeSession(nas), args())
 got = status(data["items"])
-want = {"dsm_version": "FAIL", "sa_26_14_packages": "FAIL", "firewall": "FAIL", "quickconnect": "WARN",
+want = {"dsm_version": "FAIL", "dsm_auto_update": "WARN", "sa_26_14_packages": "FAIL", "firewall": "FAIL", "quickconnect": "WARN",
         "router_port_forwarding": "WARN", "public_ports": "SKIP", "external_signins": "FAIL", "failed_signins": "WARN",
         "autoblock": "WARN", "smb_min_protocol": "FAIL", "admin_account": "WARN",
         "snapshot_schedule:photos": "PASS", "snapshot_worm:photos": "FAIL",
@@ -35,6 +35,20 @@ ext = next(i for i in data["items"] if i["id"] == "external_signins")
 assert "ops from 1.2.3.4 via password x1" in ext["detail"] and "192.0.2.50" not in ext["detail"], ext
 fs = next(i for i in data["items"] if i["id"] == "failed_signins")
 assert "25 failed" in fs["detail"] and "latest 2026/10/30 11:24:00" in fs["detail"], fs
+au = next(i for i in data["items"] if i["id"] == "dsm_auto_update")
+assert "notify" in au["detail"] and "Automatically install important updates" in au["hint"], au
+# SA-26:17: an old Plex Media Server that is running fails the package item and is in the fix plan
+px = FakeNas()
+px.st["php"] = "stop"
+px.st["extra_pkgs"] = [{"id": "PlexMediaServer", "version": "1.42.2.10156-700010156", "additional": {"status": "running"}}]
+pxi = next(i for i in incident.audit(FakeSession(px), args())[1]["items"] if i["id"] == "sa_26_14_packages")
+assert pxi["status"] == "FAIL" and "PlexMediaServer" in pxi["detail"] and "SA-26:17" in pxi["detail"], pxi
+pplan = incident.fix(FakeSession(px), args(dry_run=True, only="packages"))[1]["plan"]
+assert any(c["target"] == "PlexMediaServer" and "SA-26:17" in c["before"] for c in pplan), pplan
+# auto-update on: PASS
+ao = FakeNas()
+ao.st["autoupd"] = "hotfix-security"
+assert status(incident.audit(FakeSession(ao), args())[1]["items"])["dsm_auto_update"] == "PASS"
 # QuickConnect off but its port-forwarding setting on: PASS (the fix still turns the setting off)
 qn = FakeNas()
 qn.st["qc"] = False

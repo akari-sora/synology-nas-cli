@@ -154,7 +154,7 @@ def alert(s, args):
     fwver = sysinfo.get("firmware_ver", "")
     verdict = advisories.dsm_verdict(fwver)
     if verdict.get("status") != "patched":
-        bits = ", ".join(advisories.advisory_phrase(verdict["advisories"][k]) for k in ("sa_26_13", "sa_26_19"))
+        bits = ", ".join(advisories.advisory_phrase(verdict["advisories"][k]) for k in advisories.DSM_ADVISORIES)
         msg = f"{fwver}: {bits}"
         if verdict.get("note"):
             msg += f" ({verdict['note']})"
