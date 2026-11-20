@@ -1,5 +1,9 @@
 # synology-nas-cli
 
+<!-- yarkr:badges:start -->
+[![Indexed on Yarkr](https://api.yarkr.com/functions/v1/api/api/v1/badges/repos/akari-sora/synology-nas-cli/version.svg)](https://yarkr.com/arks/akari-sora/synology-nas-cli)
+<!-- yarkr:badges:end -->
+
 **Audit a Synology NAS against the C3RB3R / `.L0CK3D` ransomware campaign with one command, fix what it finds with a second, and keep running DSM from the terminal afterwards.**
 
 [English](README.md) · [繁體中文](README.zh-TW.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Deutsch](README.de.md) · [Español](README.es.md) · [Français](README.fr.md)
@@ -154,6 +158,39 @@ $EDITOR ~/.config/synology-nas-cli/config.json
 nas config show                      # effective config, commands masked
 nas whoami                           # one login: account, admin flag, DSM version, credential source
 ```
+
+<!-- yarkr:install:start -->
+## Install with Yarkr
+
+This repo is indexed on [Yarkr](https://yarkr.com/arks/akari-sora/synology-nas-cli) as the ark [akari-sora/synology-nas-cli](https://yarkr.com/arks/akari-sora/synology-nas-cli), so its skills install into Claude Code, Codex, Cursor and other agent harnesses with one command.
+
+### CLI
+
+Install the whole ark, which Yarkr keeps equal to this repo:
+
+```bash
+npx yarkr-cli sync akari-sora/synology-nas-cli
+```
+
+Or add individual skills:
+
+```bash
+npx yarkr-cli add skill:akari-sora/synology-nas-cli/synology-nas
+npx yarkr-cli add skill:akari-sora/synology-nas-cli/synology-ransomware-response
+```
+
+No Node.js? `curl -fsSL https://yarkr.com/install.sh | sh` (macOS, Linux) or `irm https://yarkr.com/install.ps1 | iex` (Windows PowerShell) installs `yarkr` as a standalone binary; then type `yarkr` in place of `npx yarkr-cli`.
+
+### MCP
+
+Connect your agent to the ark over MCP:
+
+```bash
+npx yarkr-cli mcp add akari-sora/synology-nas-cli
+```
+
+Or point any MCP client at `https://api.yarkr.com/functions/v1/api/mcp/o/akari-sora/synology-nas-cli`.
+<!-- yarkr:install:end -->
 
 ## Pick your setup
 
