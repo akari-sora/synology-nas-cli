@@ -7,8 +7,8 @@ Exit status: 0 when nothing is at warning/critical level, 1 otherwise
 - kind "event": something that happened since the previous run; reported once.
 
 State between runs lives in a small JSON file (config alert.state_file):
-per-disk Power_Cycle_Count, the NAS boot time, and the newest
-connection-log entry already looked at.
+per-disk power-cycle count (SMART name Power Cycles or Power_Cycle_Count),
+the NAS boot time, and the newest connection-log entry already looked at.
 """
 
 from __future__ import annotations
@@ -114,14 +114,41 @@ def _newest_recording_local(root: str, cam: str) -> float | None:
     return None
 
 
+# Compared with case, spaces and underscores removed. ID 12 is not consulted:
+# on NVMe DSM reports ID 12 as Power On Hours and the cycle count as ID 11
+# ("Power Cycles"); on ATA, ID 12 is named Power_Cycle_Count.
+_POWER_CYCLE_NAMES = ("powercycles", "powercyclecount")
+
+
+def _smart_name(name) -> str:
+    return "".join(ch for ch in str(name or "").lower() if ch.isalnum())
+
+
+def _smart_raw(raw):
+    try:
+        return int(str(raw).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def _power_cycles(smart: dict | None) -> int | None:
+    """Power-cycle count from the attribute named Power Cycles or Power_Cycle_Count."""
     for row in (smart or {}).get("smartInfo") or []:
-        if str(row.get("id")) == "12" or "Power_Cycle" in str(row.get("name")):
-            try:
-                return int(row.get("raw"))
-            except (TypeError, ValueError):
-                return None
+        if _smart_name(row.get("name")) in _POWER_CYCLE_NAMES:
+            return _smart_raw(row.get("raw"))
     return None
+
+
+def _id12_is_hours(smart: dict | None) -> bool:
+    """True when SMART ID 12 is present and is not the power-cycle attribute.
+
+    Baselines written before name matching stored ID 12: Power_Cycle_Count on
+    ATA, Power On Hours on NVMe.
+    """
+    for row in (smart or {}).get("smartInfo") or []:
+        if str(row.get("id")) == "12":
+            return _smart_name(row.get("name")) not in _POWER_CYCLE_NAMES
+    return False
 
 
 def alert(s, args):
@@ -205,11 +232,14 @@ def alert(s, args):
     smart = s.call_many([{"api": "SYNO.Storage.CGI.Smart", "method": "get_smart_info", "version": 1,
                           "params": {"device": d.get("device") or f"/dev/{d.get('id')}"}} for d in disks]) if disks else []
     now_disks = {}
+    id12_hours = {}
     for d, r in zip(disks, smart):
         data, _ = part("SYNO.Storage.CGI.Smart", r)
-        now_disks[d.get("serial") or d.get("id")] = {
+        key = d.get("serial") or d.get("id")
+        now_disks[key] = {
             "slot": d.get("slot_id"), "name": d.get("longName") or d.get("id"),
             "model": (d.get("model") or "").strip(), "power_cycle": _power_cycles(data)}
+        id12_hours[key] = _id12_is_hours(data)
 
     # UPS
     checks += 1
@@ -317,15 +347,24 @@ def alert(s, args):
     if first_run:
         state = {"created": sysinfo.get("time"), "boot_time": boot, "disks": {}, "last_log_time": None}
     rebooted = bool(boot and state.get("boot_time") and boot != state.get("boot_time"))
+    # power_cycle_by_name is written with every baseline this version saves.
+    # Without it, power_cycle is SMART ID 12 (Power On Hours on NVMe). When
+    # that stored hours value is below the real cycle count, comparing them
+    # raises a false disk_power_cycled. Adopt the name-based count and emit
+    # nothing for that disk. ATA still compares: ID 12 there is named
+    # Power_Cycle_Count, so a real increase on this run is reported. An NVMe
+    # cycle that happened while the baseline held hours is not reconstructed.
+    legacy = not state.get("power_cycle_by_name")
     for key, cur in now_disks.items():
         checks += 1
         prev = state["disks"].get(key)
         if prev and cur["power_cycle"] is not None and prev.get("power_cycle") is not None:
-            delta = cur["power_cycle"] - prev["power_cycle"]
-            if delta > (1 if rebooted else 0):
-                add("warning", "disk_power_cycled", "event",
-                    f"{cur['name']} ({cur['model']}) power-cycled {delta}× since the last check "
-                    f"(NAS {'rebooted once' if rebooted else 'did not reboot'}): drive lost power in its bay")
+            if not (legacy and id12_hours.get(key)):
+                delta = cur["power_cycle"] - prev["power_cycle"]
+                if delta > (1 if rebooted else 0):
+                    add("warning", "disk_power_cycled", "event",
+                        f"{cur['name']} ({cur['model']}) power-cycled {delta}× since the last check "
+                        f"(NAS {'rebooted once' if rebooted else 'did not reboot'}): drive lost power in its bay")
     for key, prev in state["disks"].items():
         if key not in now_disks:
             add("warning", "disk_missing", "event", f"{prev.get('name')} ({prev.get('model')}) is no longer detected")
@@ -369,6 +408,7 @@ def alert(s, args):
         state["disks"] = now_disks
         state["last_log_time"] = max(filter(None, [cursor, newest]), default=None)
         state["updated"] = sysinfo.get("time")
+        state["power_cycle_by_name"] = True
         _save_state(args.state, state)
 
     bad = [f for f in findings if f["level"] in ("critical", "warning")]
