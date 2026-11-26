@@ -12,7 +12,7 @@ One pass of checks. Exit status 0 when nothing is at warning/critical level (inf
 
 - `message` is at most 500 characters with control characters escaped (`\n`, `\x1b`, ...): account names and addresses in it come from the connection log, where whoever signs in chooses the account field.
 - `kind: condition` is true right now and repeats on every run while it lasts.
-- `kind: event` happened since the previous run and is reported once. Events come from the baseline file (`alert.state_file`): per-disk Power_Cycle_Count, the NAS boot time, and the newest connection-log entry already seen. The first run writes the baseline and reports no events. Keep the scheduled run in one place; for manual looks elsewhere use `--no-update` so the baseline is not touched.
+- `kind: event` happened since the previous run and is reported once. Events come from the baseline file (`alert.state_file`): per-disk power-cycle count (the SMART attribute named Power Cycles or Power_Cycle_Count), the NAS boot time, and the newest connection-log entry already seen. The first run writes the baseline and reports no events. Keep the scheduled run in one place; for manual looks elsewhere use `--no-update` so the baseline is not touched.
 
 | code | level | kind | when |
 |---|---|---|---|
@@ -22,7 +22,7 @@ One pass of checks. Exit status 0 when nothing is at warning/critical level (inf
 | `dsm_update_available` | info | condition | Synology's update server offers an update |
 | `disk_status` / `disk_smart` | warning | condition | a disk's status or SMART is not normal |
 | `pool_status` / `volume_status` | warning | condition | a storage pool / volume is not normal |
-| `disk_power_cycled` | warning | event | a disk's Power_Cycle_Count went up while the NAS did not reboot (or by more than 1): the drive lost power in its bay |
+| `disk_power_cycled` | warning | event | a disk's power-cycle count (SMART name Power Cycles or Power_Cycle_Count) went up while the NAS did not reboot (or by more than 1): the drive lost power in its bay |
 | `disk_missing` | warning | event | a disk seen last time is gone |
 | `nas_rebooted` | info | event | boot time changed |
 | `ups_on_battery` | critical | condition | UPS on battery |
@@ -39,6 +39,8 @@ One pass of checks. Exit status 0 when nothing is at warning/critical level (inf
 | `alert_failed` | warning | condition | push only: the check itself failed 3 runs in a row |
 
 Options: `--window 60`, `--since "YYYY-MM-DD HH:MM"`, `--failed-threshold 20`, `--log-limit 5000`, `--key-days 14`, `--state FILE`, `--no-update`, `--push FILE`.
+
+On NVMe, DSM reports SMART ID 12 as Power On Hours and the cycle count as ID 11 (Power Cycles). On ATA, ID 12 is named Power_Cycle_Count. The baseline stores the name-based count. A file written when ID 12 was stored unconditionally may hold hours for an NVMe drive. The first `nas alert` that updates that file writes the cycle count, sets `power_cycle_by_name` to true, and does not raise `disk_power_cycled` for the NVMe change of unit. `--no-update` leaves the file as it is and also does not raise that alert. An ATA disk in the same file keeps its stored count, so an increase on that run is still reported. An NVMe power cycle that happened while the baseline held hours is not reconstructed; increases after the file is rewritten are.
 
 ## `--push FILE`: what gets sent
 
@@ -92,7 +94,7 @@ Some chat assistants offer "routines" (scheduled tasks) with a webhook trigger: 
 
 ### No webhook: DSM's own notifications
 
-DSM can notify by email and by mobile push (DS finder app) without any webhook: Control Panel > Notification (控制台 > 通知設定) > Email / Push Service, and the Rules tab picks which events. This covers DSM's own warning/error events (disk and pool failures, UPS on battery, AutoBlock blocking an address, backup and snapshot task failures). It does not cover the checks only `nas alert` makes (immutable-snapshot trap, stale scheduled snapshots, successful sign-ins from unexpected networks, Power_Cycle_Count jumps).
+DSM can notify by email and by mobile push (DS finder app) without any webhook: Control Panel > Notification (控制台 > 通知設定) > Email / Push Service, and the Rules tab picks which events. This covers DSM's own warning/error events (disk and pool failures, UPS on battery, AutoBlock blocking an address, backup and snapshot task failures). It does not cover the checks only `nas alert` makes (immutable-snapshot trap, stale scheduled snapshots, successful sign-ins from unexpected networks, power-cycle count jumps).
 
 ## Deployment
 
